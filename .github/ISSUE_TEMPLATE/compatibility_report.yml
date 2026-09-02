@@ -1,0 +1,56 @@
+name: Compatibility report
+description: Share a successful or failed macOS, hardware, folder, or voice result.
+title: "[Compatibility]: "
+body:
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works as expected
+        - Works with limitations
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and hardware
+      placeholder: macOS 26.x, Apple M…
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area tested
+      multiple: true
+      options:
+        - Clean build and launch
+        - Markdown folder
+        - Obsidian vault
+        - Voice recognition
+        - Apple Intelligence fallback
+        - Kontext provider
+        - Accessibility or reduced motion
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened?
+      description: Include exact steps and synthetic or redacted evidence for limitations or failures.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal note content, credentials, tokens, and identifying paths.
+          required: true

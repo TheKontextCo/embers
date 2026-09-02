@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Pin the public support floor instead of allowing `-latest` to drift.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test
+        run: swift test
+      - name: Check repository readiness
+        run: ./scripts/verify-repository-readiness.sh
+      - name: Check release scripts
+        run: ./scripts/test-release-scripts.sh
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD

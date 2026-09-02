@@ -1,0 +1,5 @@
+// Shared signing configuration. Keep machine-specific team selection in the ignored
+// Signing.local.xcconfig so contributors can use their own Apple Development identity.
+#include? "Signing.local.xcconfig"
+
+CODE_SIGN_STYLE = Automatic

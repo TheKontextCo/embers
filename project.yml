@@ -1,0 +1,41 @@
+# XcodeGen spec — produces a REAL macOS .app target so Xcode Cmd+R launches a proper
+# app (LaunchServices-registered, can activate / take key window / register the embers://
+# scheme). The SwiftPM package stays for `swift build` + `swift test`; this is the run vehicle.
+#
+# Regenerate after changing this file:  xcodegen generate
+name: embers
+options:
+  bundleIdPrefix: com.embers
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+targets:
+  embers:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/embers
+      - path: Resources/AppIcon.icns
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources/en.lproj
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: embers
+        PRODUCT_BUNDLE_IDENTIFIER: com.embers.app
+        ARCHS: arm64
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/embers.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+    scheme:
+      testTargets: []
+      gatherCoverageData: false

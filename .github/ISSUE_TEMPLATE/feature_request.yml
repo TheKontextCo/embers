@@ -1,0 +1,41 @@
+name: Focused proposal
+description: Propose a user-facing improvement with evidence and explicit boundaries.
+title: "[Proposal]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What concrete problem occurs today, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add a synthetic example, compatibility result, or other reproducible evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Smallest useful outcome
+      description: Describe the behaviour, not an implementation mandate.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What should this proposal explicitly avoid changing?
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Product boundaries
+      options:
+        - label: The proposal keeps the local-folder path useful without an account, cloud request, or required model.
+          required: true
+        - label: I used only synthetic or redacted examples.
+          required: true

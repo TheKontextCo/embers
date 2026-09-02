@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible Embers failure using synthetic or redacted evidence.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make Embers reliable. Do not include personal vault content, credentials, access tokens, or unredacted user paths. Report vulnerabilities through the private security route instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Published version or full commit SHA where the problem occurs.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and hardware
+      placeholder: macOS 26.x, Apple M…
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation
+      options:
+        - Published signed release
+        - Source build with bundle.sh
+        - Xcode shared scheme
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Minimal reproduction
+      description: Use the bundled sample vault or another synthetic fixture where possible.
+      placeholder: |
+        1. Launch Embers…
+        2. Select…
+        3. Observe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Add sanitized logs, screenshots, or a synthetic fixture if useful.
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal note content, credentials, tokens, and identifying paths.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

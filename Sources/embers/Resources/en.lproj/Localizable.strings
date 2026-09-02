@@ -1,0 +1,18 @@
+/* Release, support, permission, and core settings language. */
+"about.title" = "About Embers";
+"about.version" = "Version %@ (%@)";
+"about.localFirst" = "Local-first context engine for macOS.";
+"about.openProject" = "Open project";
+"about.reportIssue" = "Report an issue";
+"about.security" = "Security on GitHub";
+"menu.open" = "Open Embers";
+"menu.stopListening" = "Stop listening";
+"menu.startListening" = "Start listening";
+"menu.chooseFolder" = "Choose context folder…";
+"menu.quit" = "Quit Embers";
+"settings.title" = "Settings";
+"settings.general" = "GENERAL";
+"settings.launchAtLogin" = "Launch at login";
+"settings.launchAtLoginDetail" = "Keep Embers available after signing in";
+"settings.listening" = "LISTENING & NOTCH";
+"settings.privacy" = "Folder content, extracted text, and audio stay on this Mac. Connected providers contact their service only after you connect them.";

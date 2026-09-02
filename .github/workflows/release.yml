@@ -1,0 +1,86 @@
+name: Prepare notarized release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.0
+        required: true
+        type: string
+      build:
+        description: Monotonic CFBundleVersion
+        required: true
+        type: string
+      confirm_notarization:
+        description: Type NOTARIZE to use production signing and notarization secrets
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: inputs.confirm_notarization == 'NOTARIZE'
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test before signing
+        run: swift test
+      - name: Validate release inputs before loading credentials
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUILD: ${{ inputs.build }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version." >&2
+            exit 64
+          fi
+          if [[ ! "$RELEASE_BUILD" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid release build." >&2
+            exit 64
+          fi
+      - name: Create ephemeral signing keychain
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.RELEASE_KEYCHAIN_PASSWORD }}
+          NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KEYCHAIN_PATH="$RUNNER_TEMP/embers-release.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
+          echo "$CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          echo "$NOTARY_KEY_BASE64" | base64 -D > "$NOTARY_KEY_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          xcrun notarytool store-credentials embers-ci-notary \
+            --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*\"\(Developer ID Application:.*\)\"/\1/p' | head -n1)"
+          test -n "$IDENTITY"
+          printf 'EMBERS_SIGNING_IDENTITY=%s\n' "$IDENTITY" >> "$GITHUB_ENV"
+          printf 'EMBERS_NOTARY_KEYCHAIN_PROFILE=embers-ci-notary\n' >> "$GITHUB_ENV"
+      - name: Build, notarize, and verify
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUILD: ${{ inputs.build }}
+        run: ./scripts/release.sh "$RELEASE_VERSION" "$RELEASE_BUILD"
+      - name: Upload release candidates for manual publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: embers-${{ inputs.version }}-macos-dmg
+          path: build/release/
+          if-no-files-found: error
+      - name: Remove ephemeral signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/embers-release.keychain-db" || true

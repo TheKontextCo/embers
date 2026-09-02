@@ -1,0 +1,103 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* EmbersCore in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000201 /* EmbersCore */; };
+		100000000000000000000102 /* EmbersLocal in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000202 /* EmbersLocal */; };
+		100000000000000000000103 /* EmbersPluginHost in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000203 /* EmbersPluginHost */; };
+		100000000000000000000104 /* FolderPlugin in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000204 /* FolderPlugin */; };
+		100000000000000000000105 /* KontextPlugin in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000205 /* KontextPlugin */; };
+		100000000000000000000106 /* EmbersPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000206 /* EmbersPluginKit */; };
+		100000000000000000000107 /* SampleVault in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* SampleVault */; };
+/* End PBXBuildFile section */
+/* Begin PBXFileReference section */
+		100000000000000000000001 /* embers.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = embers.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000005 /* SampleVault */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/embers/Resources/SampleVault; sourceTree = "<group>"; };
+		100000000000000000000007 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		100000000000000000000006 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {isa = PBXFileSystemSynchronizedBuildFileExceptionSet; membershipExceptions = (Resources/SampleVault,); target = 100000000000000000000020 /* embers */;};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		100000000000000000000002 /* embers */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (100000000000000000000006 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,); explicitFileTypes = {}; explicitFolders = (); path = Sources/embers; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000010 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
+			100000000000000000000101 /* EmbersCore in Frameworks */,
+			100000000000000000000102 /* EmbersLocal in Frameworks */,
+			100000000000000000000103 /* EmbersPluginHost in Frameworks */,
+			100000000000000000000104 /* FolderPlugin in Frameworks */,
+			100000000000000000000105 /* KontextPlugin in Frameworks */,
+			100000000000000000000106 /* EmbersPluginKit in Frameworks */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+/* Begin PBXGroup section */
+		100000000000000000000003 = {isa = PBXGroup; children = (100000000000000000000002 /* embers */, 100000000000000000000005 /* SampleVault */, 100000000000000000000007 /* Signing.xcconfig */, 100000000000000000000004 /* Products */,); sourceTree = "<group>"; };
+		100000000000000000000004 /* Products */ = {isa = PBXGroup; children = (100000000000000000000001 /* embers.app */,); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+/* Begin PBXNativeTarget section */
+		100000000000000000000020 /* embers */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000030 /* Build configuration list for PBXNativeTarget "embers" */;
+			buildPhases = (100000000000000000000011 /* Sources */, 100000000000000000000010 /* Frameworks */, 100000000000000000000012 /* Resources */,);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (100000000000000000000002 /* embers */,);
+			name = embers;
+			packageProductDependencies = (100000000000000000000201 /* EmbersCore */, 100000000000000000000202 /* EmbersLocal */, 100000000000000000000203 /* EmbersPluginHost */, 100000000000000000000204 /* FolderPlugin */, 100000000000000000000205 /* KontextPlugin */, 100000000000000000000206 /* EmbersPluginKit */,);
+			productName = embers;
+			productReference = 100000000000000000000001 /* embers.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+/* Begin PBXProject section */
+		100000000000000000000021 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2600;};
+			buildConfigurationList = 100000000000000000000031 /* Build configuration list for PBXProject "embers" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base,);
+			mainGroup = 100000000000000000000003;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (100000000000000000000200 /* XCLocalSwiftPackageReference "." */,);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 100000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (100000000000000000000020 /* embers */,);
+		};
+/* End PBXProject section */
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000012 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000107 /* SampleVault in Resources */,); runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXResourcesBuildPhase section */
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000011 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXSourcesBuildPhase section */
+/* Begin XCBuildConfiguration section */
+		100000000000000000000040 /* Debug */ = {isa = XCBuildConfiguration; baseConfigurationReference = 100000000000000000000007 /* Signing.xcconfig */; buildSettings = {CODE_SIGN_ENTITLEMENTS = Resources/embers.entitlements; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Resources/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks",); MARKETING_VERSION = 0.1.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.embers.app; PRODUCT_NAME = embers; SDKROOT = macosx; SWIFT_VERSION = 5.0;}; name = Debug;};
+		100000000000000000000041 /* Release */ = {isa = XCBuildConfiguration; baseConfigurationReference = 100000000000000000000007 /* Signing.xcconfig */; buildSettings = {CODE_SIGN_ENTITLEMENTS = Resources/embers.entitlements; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Resources/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks",); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.embers.app; PRODUCT_NAME = embers; SDKROOT = macosx; SWIFT_VERSION = 5.0;}; name = Release;};
+		100000000000000000000042 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; MACOSX_DEPLOYMENT_TARGET = 26.0; SDKROOT = macosx;}; name = Debug;};
+		100000000000000000000043 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; MACOSX_DEPLOYMENT_TARGET = 26.0; SDKROOT = macosx;}; name = Release;};
+/* End XCBuildConfiguration section */
+/* Begin XCConfigurationList section */
+		100000000000000000000030 /* Build configuration list for PBXNativeTarget "embers" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000040 /* Debug */, 100000000000000000000041 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug;};
+		100000000000000000000031 /* Build configuration list for PBXProject "embers" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000042 /* Debug */, 100000000000000000000043 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug;};
+/* End XCConfigurationList section */
+/* Begin XCLocalSwiftPackageReference section */
+		100000000000000000000200 /* XCLocalSwiftPackageReference "." */ = {isa = XCLocalSwiftPackageReference; relativePath = .;};
+/* End XCLocalSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+		100000000000000000000201 /* EmbersCore */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = EmbersCore;};
+		100000000000000000000202 /* EmbersLocal */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = EmbersLocal;};
+		100000000000000000000203 /* EmbersPluginHost */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = EmbersPluginHost;};
+		100000000000000000000204 /* FolderPlugin */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = FolderPlugin;};
+		100000000000000000000205 /* KontextPlugin */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = KontextPlugin;};
+		100000000000000000000206 /* EmbersPluginKit */ = {isa = XCSwiftPackageProductDependency; package = 100000000000000000000200 /* XCLocalSwiftPackageReference "." */; productName = EmbersPluginKit;};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 100000000000000000000021 /* Project object */;
+}

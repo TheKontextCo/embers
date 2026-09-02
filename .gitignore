@@ -1,0 +1,18 @@
+# SwiftPM
+/.build/
+/.swiftpm/
+*.xcuserdatad/
+
+# Build output
+/build/
+/dist/
+
+# macOS
+.DS_Store
+
+# Editor-local configuration
+/.vscode/
+
+# The shared Xcode project is a supported build path. User state remains ignored by
+# `*.xcuserdatad` above.
+/Config/Signing.local.xcconfig

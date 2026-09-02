@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Embers</string>
+	<key>CFBundleDisplayName</key>
+	<string>Embers</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.embers.app</string>
+	<key>CFBundleExecutable</key>
+	<string>embers</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+	</array>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 The Kontext Co. Licensed under MIT.</string>
+	<key>EmbersProjectURL</key>
+	<string>https://github.com/TheKontextCo/embers</string>
+	<key>EmbersIssueURL</key>
+	<string>https://github.com/TheKontextCo/embers/issues/new</string>
+	<key>EmbersSecurityURL</key>
+	<string>https://github.com/TheKontextCo/embers/security</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.embers.app.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>embers</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>embers listens so it can surface the threads, entities, and context relevant to what you're talking about.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>embers transcribes speech on-device to match against your context graph and peek the relevant items.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

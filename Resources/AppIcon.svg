@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original Embers app icon source. Generated into AppIcon.icns by scripts/generate-app-icon.sh. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="120" y1="80" x2="900" y2="970" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#251109"/>
+      <stop offset="0.5" stop-color="#4a1d0b"/>
+      <stop offset="1" stop-color="#150a07"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="415" y1="820" x2="650" y2="205" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff6b1a"/>
+      <stop offset="0.52" stop-color="#ffb21a"/>
+      <stop offset="1" stop-color="#fff0a8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+  </defs>
+  <rect x="40" y="40" width="944" height="944" rx="222" fill="url(#background)"/>
+  <path d="M512 176C415 315 312 424 312 577c0 129 89 235 200 235s200-106 200-235c0-153-103-262-200-401Z" fill="#ff7a22" opacity=".33" filter="url(#glow)"/>
+  <path d="M516 174C464 286 370 390 370 542c0 107 63 193 142 193s142-86 142-193c0-142-75-247-138-368Zm-4 162c30 76 73 134 73 216 0 58-31 104-73 104s-73-46-73-104c0-85 45-142 73-216Z" fill="url(#ember)" fill-rule="evenodd"/>
+  <circle cx="512" cy="786" r="42" fill="#ff6b1a" opacity=".9"/>
+</svg>

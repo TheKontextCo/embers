@@ -1,0 +1,5 @@
+/* Localized macOS permission prompts. */
+"CFBundleDisplayName" = "Embers";
+"CFBundleName" = "Embers";
+"NSMicrophoneUsageDescription" = "Embers listens so it can surface the threads, entities, and context relevant to what you are talking about.";
+"NSSpeechRecognitionUsageDescription" = "Embers transcribes speech on-device to match against your context graph and surface relevant items.";
