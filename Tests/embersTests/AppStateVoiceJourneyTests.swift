@@ -146,6 +146,42 @@ final class AppStateVoiceJourneyTests: XCTestCase {
         try await waitForSelection("apollo", in: app.dash)
     }
 
+    func testOpenedVoicePeekCanBeRejectedOnceAndUndone() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        XCTAssertNotNil(peek.routeEvidence)
+
+        app.openPeek(peek)
+        XCTAssertNotNil(app.voiceLearning.activeJourney)
+        XCTAssertTrue(app.rejectActivePeekJourney())
+        XCTAssertFalse(app.rejectActivePeekJourney(), "The same visible journey must be consumed only once.")
+        try await waitForExclusionCount(1, in: app.voiceLearning)
+        XCTAssertEqual(app.voiceLearning.notice?.message, "Not this — learned")
+        XCTAssertTrue(app.peeks.peeks.isEmpty)
+
+        app.undoVoiceRejection()
+        try await waitForExclusionCount(0, in: app.voiceLearning)
+        XCTAssertNil(app.voiceLearning.notice)
+    }
+
+    func testManualContextOpenCannotCreateNegativeVoiceLearning() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.openMatch(.init(phrase: "Apollo", ref: .node("apollo"), title: "Apollo"))
+
+        XCTAssertNil(app.voiceLearning.activeJourney)
+        XCTAssertFalse(app.rejectActivePeekJourney())
+        XCTAssertTrue(app.voiceLearning.snapshot.exclusions.isEmpty)
+    }
+
     private func waitForSolePeek(in queue: PeekQueue) async throws -> Peek {
         for _ in 0..<100 {
             if queue.peeks.count == 1 { return queue.peeks[0] }
@@ -160,6 +196,17 @@ final class AppStateVoiceJourneyTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(dashboard.selected, nodeID)
+    }
+
+    private func waitForExclusionCount(
+        _ count: Int,
+        in learning: VoiceLearningCoordinator
+    ) async throws {
+        for _ in 0..<100 {
+            if learning.snapshot.exclusions.count == count { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(learning.snapshot.exclusions.count, count)
     }
 }
 
@@ -205,6 +252,11 @@ private struct AppStateVoiceFixture {
                 fileURL: rootURL.appendingPathComponent("voice-preferences.json")
             )
         )
+        let voiceLearning = VoiceLearningCoordinator(
+            store: VoiceLearningStore(
+                fileURL: rootURL.appendingPathComponent("voice-learning.json")
+            )
+        )
         let voiceRouting = VoiceRoutingCoordinator(
             context: controller,
             speech: speech,
@@ -212,6 +264,7 @@ private struct AppStateVoiceFixture {
             peeks: peeks,
             packLifecycle: packLifecycle,
             preferences: preferences,
+            learning: voiceLearning,
             featureFlags: featureFlags
         )
         let changeBaselines = UserDefaultsChangeBaselineStore(
@@ -229,6 +282,7 @@ private struct AppStateVoiceFixture {
             notch: notch,
             peeks: peeks,
             voiceRouting: voiceRouting,
+            voiceLearning: voiceLearning,
             dashboardNavigation: navigation,
             taskMutations: DashboardTaskMutationCoordinator(context: controller, navigation: navigation),
             changeBaselines: changeBaselines

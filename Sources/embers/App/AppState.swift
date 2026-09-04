@@ -16,6 +16,9 @@ final class AppState: ObservableObject {
         voiceRoutingPreferences: voiceRoutingPreferenceState,
         navigation: dashboardNavigation,
         taskMutations: taskMutations,
+        willNavigateManually: { [weak self] in
+            self?.voiceLearning.invalidateJourney()
+        },
         chooseDirectory: { [weak self] providerID in
             self?.presentFolderPicker(for: providerID)
         },
@@ -29,6 +32,7 @@ final class AppState: ObservableObject {
     let peeks: PeekQueue
     let speech: SpeechListener
     let voiceRouting: VoiceRoutingCoordinator
+    let voiceLearning: VoiceLearningCoordinator
     var voiceRoutingStatus: VoiceRoutingStatus { voiceRouting.status }
     var voiceRoutingPreferenceState: VoiceRoutingPreferenceState { voiceRouting.preferenceState }
 
@@ -37,6 +41,7 @@ final class AppState: ObservableObject {
     private let changeBaselines: any ChangeBaselineStore
     private let hoverMon = HoverMonitor()
     private let keys = KeyMonitor()
+    private let secondaryClicks = SecondaryClickMonitor()
     private var cancellables = Set<AnyCancellable>()
     private var muteHotKey: GlobalHotKey?
     private var contextLensExportTask: Task<Void, Never>?
@@ -49,6 +54,7 @@ final class AppState: ObservableObject {
         notch: NotchViewModel,
         peeks: PeekQueue,
         voiceRouting: VoiceRoutingCoordinator,
+        voiceLearning: VoiceLearningCoordinator,
         dashboardNavigation: DashboardNavigationCoordinator,
         taskMutations: DashboardTaskMutationCoordinator,
         changeBaselines: any ChangeBaselineStore
@@ -58,6 +64,7 @@ final class AppState: ObservableObject {
         self.notch = notch
         self.peeks = peeks
         self.voiceRouting = voiceRouting
+        self.voiceLearning = voiceLearning
         self.dashboardNavigation = dashboardNavigation
         self.taskMutations = taskMutations
         self.changeBaselines = changeBaselines
@@ -78,6 +85,9 @@ final class AppState: ObservableObject {
             await self.voiceRouting.removeSourceCaches(sourceID)
         }
         voiceRouting.start(delegate: self)
+        secondaryClicks.start { [weak self] event in
+            self?.handleSecondaryClick(event) ?? false
+        }
         installMuteHotkey()
         Task {
             await context.bootstrap()
@@ -204,9 +214,16 @@ final class AppState: ObservableObject {
     func openNotch(
         anchor: String? = nil,
         closeWhenPointerLeaves: Bool = false,
-        takeKeyboardFocus: Bool = false
+        takeKeyboardFocus: Bool = false,
+        routeEvidence: RoutePresentationEvidence? = nil,
+        routePeekID: String? = nil
     ) {
         guard notch.state == .closed || anchor != nil else { return }
+        if let routeEvidence {
+            voiceLearning.beginJourney(routeEvidence, peekID: routePeekID)
+        } else if anchor != nil {
+            voiceLearning.invalidateJourney()
+        }
         let resumesNavigation = anchor == nil && dash.resumeRetainedNavigation()
         if anchor != nil { dash.discardRetainedNavigation() }
         Log.app.info("notch_opened")
@@ -231,8 +248,25 @@ final class AppState: ObservableObject {
         openNotch(anchor: nodeID, closeWhenPointerLeaves: closeWhenPointerLeaves, takeKeyboardFocus: true)
     }
 
+    /// A routed Peek carries its exact trigger identity into the opened context.
+    /// Hover, click, and the spoken "open" command all converge here.
+    func openPeek(_ peek: Peek, closeWhenPointerLeaves: Bool = false) {
+        guard case .node(let nodeID) = peek.target.ref else { return }
+        if let conceptID = peek.target.conceptID {
+            voiceRouting.recordOpen(conceptID: conceptID, nodeID: nodeID)
+        }
+        openNotch(
+            anchor: nodeID,
+            closeWhenPointerLeaves: closeWhenPointerLeaves,
+            takeKeyboardFocus: true,
+            routeEvidence: peek.routeEvidence,
+            routePeekID: peek.id
+        )
+    }
+
     func closeNotch(immediately: Bool = false) {
         guard notch.state == .open else { return }
+        voiceLearning.invalidateJourney()
         keys.stop(); dash.dismissSettings()
         dash.retainNavigationForReturn()
         if immediately {
@@ -262,10 +296,46 @@ final class AppState: ObservableObject {
 
     private func handleKey(_ key: KeyMonitor.Key) {
         switch key {
-        case .escape: dash.selected != nil ? dash.back() : closeNotch()
+        case .escape:
+            if !rejectActivePeekJourney() {
+                dash.selected != nil ? dash.back() : closeNotch()
+            }
         case .left: if dash.selected != nil { dash.back() }
         case .right, .up, .down: break
         }
+    }
+
+    /// Handles the one-shot negative signal shared by right-click and focused
+    /// Escape. Returning true means the event belonged to an active Peek route.
+    @discardableResult
+    func rejectActivePeekJourney() -> Bool {
+        guard let journey = voiceLearning.consumeJourney() else { return false }
+        if let peekID = journey.peekID { peeks.remove(peekID) }
+        if dash.selected == journey.evidence.exclusionKey.nodeID {
+            dash.back()
+        }
+        voiceLearning.recordRejection(journey)
+        return true
+    }
+
+    func undoVoiceRejection() {
+        voiceLearning.undoNotice()
+    }
+
+    private func handleSecondaryClick(_ event: NSEvent) -> Bool {
+        guard notch.state == .open,
+              voiceLearning.activeJourney != nil,
+              let hostWindow,
+              event.window === hostWindow,
+              let bounds = hostWindow.contentView?.bounds else { return false }
+        let openSurface = CGRect(
+            x: 0,
+            y: max(0, bounds.height - NotchMetrics.openSize.height),
+            width: bounds.width,
+            height: NotchMetrics.openSize.height
+        )
+        guard openSurface.contains(event.locationInWindow) else { return false }
+        return rejectActivePeekJourney()
     }
 
     func runDemo() {
@@ -288,12 +358,20 @@ extension AppState: VoiceRoutingCoordinatorDelegate {
         Task { await dash.reload() }
     }
 
-    func voiceRoutingCoordinatorOpenAnchor(_ nodeID: String) {
+    func voiceRoutingCoordinatorOpenAnchor(
+        _ nodeID: String,
+        routeEvidence: RoutePresentationEvidence?
+    ) {
+        if let routeEvidence {
+            voiceLearning.beginJourney(routeEvidence, peekID: nil)
+        } else {
+            voiceLearning.invalidateJourney()
+        }
         Task { await dash.openAnchor(nodeID) }
     }
 
-    func voiceRoutingCoordinatorOpenMatch(_ target: MatchTarget) {
-        openMatch(target)
+    func voiceRoutingCoordinatorOpenPeek(_ peek: Peek) {
+        openPeek(peek)
     }
 }
 

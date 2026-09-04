@@ -54,6 +54,9 @@ enum AppCompositionRoot {
         let preferences = VoiceRoutingPreferenceCoordinator(
             store: VoiceRoutingPreferenceStore.applicationSupport()
         )
+        let voiceLearning = VoiceLearningCoordinator(
+            store: VoiceLearningStore.applicationSupport()
+        )
         let voiceRouting = VoiceRoutingCoordinator(
             context: context,
             speech: speech,
@@ -61,6 +64,7 @@ enum AppCompositionRoot {
             peeks: peeks,
             packLifecycle: packLifecycle,
             preferences: preferences,
+            learning: voiceLearning,
             featureFlags: featureFlags
         )
         let changeBaselines = UserDefaultsChangeBaselineStore(defaults)
@@ -79,6 +83,7 @@ enum AppCompositionRoot {
             notch: notch,
             peeks: peeks,
             voiceRouting: voiceRouting,
+            voiceLearning: voiceLearning,
             dashboardNavigation: dashboardNavigation,
             taskMutations: taskMutations,
             changeBaselines: changeBaselines

@@ -157,13 +157,19 @@ private struct MultiPeekAppStateFixture {
                 fileURL: rootURL.appendingPathComponent("voice-preferences.json")
             )
         )
+        let voiceLearning = VoiceLearningCoordinator(
+            store: VoiceLearningStore(
+                fileURL: rootURL.appendingPathComponent("voice-learning.json")
+            )
+        )
         let voiceRouting = VoiceRoutingCoordinator(
             context: controller,
             speech: speech,
             notch: notch,
             peeks: peeks,
             packLifecycle: packLifecycle,
-            preferences: preferences
+            preferences: preferences,
+            learning: voiceLearning
         )
         let changeBaselines = UserDefaultsChangeBaselineStore(
             defaults,
@@ -180,6 +186,7 @@ private struct MultiPeekAppStateFixture {
             notch: notch,
             peeks: peeks,
             voiceRouting: voiceRouting,
+            voiceLearning: voiceLearning,
             dashboardNavigation: navigation,
             taskMutations: DashboardTaskMutationCoordinator(context: controller, navigation: navigation),
             changeBaselines: changeBaselines

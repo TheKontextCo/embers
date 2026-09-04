@@ -1,13 +1,18 @@
 import Combine
 import EmbersCore
+import EmbersLocal
+import EmbersPluginHost
 import Foundation
 
 @MainActor
 protocol VoiceRoutingCoordinatorDelegate: AnyObject {
     var selectedVoiceNodeID: String? { get }
     func voiceRoutingCoordinatorReloadDashboard()
-    func voiceRoutingCoordinatorOpenAnchor(_ nodeID: String)
-    func voiceRoutingCoordinatorOpenMatch(_ target: MatchTarget)
+    func voiceRoutingCoordinatorOpenAnchor(
+        _ nodeID: String,
+        routeEvidence: RoutePresentationEvidence?
+    )
+    func voiceRoutingCoordinatorOpenPeek(_ peek: Peek)
 }
 
 /// Coordinates graph publication and transcript events into routing and presentation intents.
@@ -23,6 +28,7 @@ final class VoiceRoutingCoordinator {
     private let peeks: PeekQueue
     private let packLifecycle: VoiceRoutingPackCoordinator
     private let preferences: VoiceRoutingPreferenceCoordinator
+    private let learning: VoiceLearningCoordinator
     private let featureFlags: AppFeatureFlags
     private weak var delegate: (any VoiceRoutingCoordinatorDelegate)?
     private var hasStarted = false
@@ -31,6 +37,7 @@ final class VoiceRoutingCoordinator {
     private var baseVoiceTargets: [MatchTarget] = []
     private var baseVoiceVocabulary: [String] = []
     private var routingPack: VoiceRoutingPack?
+    private var sourceIDByNodeID: [String: String] = [:]
     private var peekOpenCommandTask: Task<Void, Never>?
     private var peekCommandTranscriptPrefix: (utteranceID: UUID, text: String)?
     private var voiceStateFingerprint: String?
@@ -43,6 +50,7 @@ final class VoiceRoutingCoordinator {
         peeks: PeekQueue,
         packLifecycle: VoiceRoutingPackCoordinator,
         preferences: VoiceRoutingPreferenceCoordinator,
+        learning: VoiceLearningCoordinator,
         featureFlags: AppFeatureFlags = AppFeatureFlags()
     ) {
         self.context = context
@@ -51,6 +59,7 @@ final class VoiceRoutingCoordinator {
         self.peeks = peeks
         self.packLifecycle = packLifecycle
         self.preferences = preferences
+        self.learning = learning
         self.featureFlags = featureFlags
     }
 
@@ -60,6 +69,7 @@ final class VoiceRoutingCoordinator {
         self.delegate = delegate
         packLifecycle.start(delegate: self)
         preferences.start(delegate: self)
+        learning.start(delegate: self)
 
         context.$graph.combineLatest(context.$snapshot)
             .sink { [weak self] graph, snapshot in self?.applyGraph(graph, snapshot: snapshot) }
@@ -69,6 +79,8 @@ final class VoiceRoutingCoordinator {
             .sink { [weak self] sources in
                 guard let self else { return }
                 self.preferences.apply(sources: sources, graph: self.context.graph)
+                self.learning.apply(sources: sources)
+                self.rebuildSourceOwnership(sources: sources, graph: self.context.graph)
             }
             .store(in: &cancellables)
 
@@ -84,6 +96,7 @@ final class VoiceRoutingCoordinator {
     func removeSourceCaches(_ sourceID: String) async {
         await packLifecycle.deleteCache()
         await preferences.removeSourceData(sourceID)
+        await learning.removeSourceData(sourceID)
     }
 
     func contextLensRequest(
@@ -106,6 +119,7 @@ final class VoiceRoutingCoordinator {
         guard fingerprint != voiceStateFingerprint else { return }
         voiceStateFingerprint = fingerprint
         preferences.apply(sources: context.contextSources, graph: graph)
+        rebuildSourceOwnership(sources: context.contextSources, graph: graph)
         guard let graph, let graphSearch = context.graphSearch else {
             baseVoiceTargets = []
             baseVoiceVocabulary = []
@@ -206,7 +220,18 @@ final class VoiceRoutingCoordinator {
         Log.speech.debug("voice_match_presented")
 
         for concept in update.sharedConcepts {
-            peeks.replaceConcept(concept.conceptID, with: concept.candidates.map(\.target))
+            let evidenceByNodeID: [String: RoutePresentationEvidence] = Dictionary(
+                uniqueKeysWithValues: concept.candidates.compactMap { match -> (String, RoutePresentationEvidence)? in
+                guard case .node(let nodeID) = match.target.ref,
+                      let evidence = routeEvidence(for: match) else { return nil }
+                return (nodeID, evidence)
+                }
+            )
+            peeks.replaceConcept(
+                concept.conceptID,
+                with: concept.candidates.map(\.target),
+                routeEvidenceByNodeID: evidenceByNodeID
+            )
             Log.speech.info("shared_concept_matched")
         }
         if !update.sharedConcepts.isEmpty {
@@ -222,13 +247,19 @@ final class VoiceRoutingCoordinator {
             voiceRouter.markPresented(update.sharedConcepts)
             voiceRouter.markPresented([preferredMatch])
             Log.speech.info("context_opened")
-            delegate?.voiceRoutingCoordinatorOpenAnchor(preferredID)
+            let routeEvidence = update.matches.count == 1 && update.sharedConcepts.isEmpty
+                ? routeEvidence(for: preferredMatch)
+                : nil
+            delegate?.voiceRoutingCoordinatorOpenAnchor(
+                preferredID,
+                routeEvidence: routeEvidence
+            )
             return
         }
         voiceRouter.markPresented(update)
         for match in update {
             Log.speech.info("context_matched")
-            peeks.push(match.target)
+            peeks.push(match.target, routeEvidence: routeEvidence(for: match))
         }
         if !update.matches.isEmpty {
             rememberPeekCommandPrefix(event)
@@ -268,7 +299,7 @@ final class VoiceRoutingCoordinator {
             return
         }
         Log.speech.info("peek_open_command_executed")
-        delegate?.voiceRoutingCoordinatorOpenMatch(candidate.target)
+        delegate?.voiceRoutingCoordinatorOpenPeek(candidate)
     }
 
     @discardableResult
@@ -278,6 +309,33 @@ final class VoiceRoutingCoordinator {
         voiceRouter.replacePreferences(preferences.snapshot)
         speech.setBaseVocabulary(voiceRouter.vocabulary + baseVoiceVocabulary)
         return voiceRouter.triggerCount
+    }
+
+    private func routeEvidence(for match: VoiceRoutingRuntimeMatch) -> RoutePresentationEvidence? {
+        guard case .node(let nodeID) = match.target.ref,
+              let sourceID = sourceIDByNodeID[nodeID] else { return nil }
+        return RoutePresentationEvidence(
+            exclusionKey: VoiceRouteExclusionKey(
+                sourceID: sourceID,
+                nodeID: nodeID,
+                pattern: match.trigger.pattern.routePatternIdentity
+            )
+        )
+    }
+
+    private func rebuildSourceOwnership(
+        sources: [HostedPluginSource],
+        graph: ContextGraph?
+    ) {
+        let sourceIDByReferenceID = sources.reduce(into: [String: String]()) { result, source in
+            let sourceID = source.descriptor.id.rawValue
+            for anchor in source.snapshot?.anchors ?? [] {
+                result[anchor.id] = sourceID
+            }
+        }
+        sourceIDByNodeID = Dictionary(uniqueKeysWithValues: (graph?.nodes ?? []).compactMap { node in
+            sourceIDByReferenceID[node.referenceID].map { (node.id, $0) }
+        })
     }
 }
 
@@ -290,5 +348,11 @@ extension VoiceRoutingCoordinator: VoiceRoutingPackCoordinatorDelegate {
 extension VoiceRoutingCoordinator: VoiceRoutingPreferenceCoordinatorDelegate {
     func voiceRoutingPreferencesDidChange() {
         voiceRouter.replacePreferences(preferences.snapshot)
+    }
+}
+
+extension VoiceRoutingCoordinator: VoiceLearningCoordinatorDelegate {
+    func voiceLearningDidChange(_ snapshot: VoiceLearningSnapshot) {
+        voiceRouter.replaceLearning(snapshot)
     }
 }
