@@ -35,6 +35,45 @@ embers (UI / speech / composition)
 - Build immutable snapshots off-main, validate, then atomically replace.
 - Preserve the last good snapshot on rebuild or enrichment failure.
 
+## Behaviour-change gate
+
+Before implementing any change that affects user-visible behaviour, persistent state, routing, permissions, or recovery, define the complete behavioural contract.
+
+- Classify every relevant input as **mutate**, **dismiss**, **inspect**, or **undo**. Neutral actions must never create durable learning or other side effects.
+- Identify the authoritative state, persisted state, derived snapshots, and all asynchronous work that can publish into them.
+- Define the canonical identity of the behaviour and any equivalent representations that must share the same result.
+- Define when the operation has genuinely succeeded, how failure is shown, and how retry, cancellation, interruption, undo, and reset behave.
+- Define the scope of durable changes. Learning, reset, and recovery must be scoped to the correct source, context, or provider.
+- Expose every deterministic decision that materially changes results through Context Lens or the appropriate inspection surface.
+
+### State and concurrency
+
+- A mutation must invalidate, cancel, or supersede older asynchronous work before that work can publish stale state.
+- Every asynchronous snapshot publisher must prove that its result is still current before replacing accepted state.
+- Preserve the last good immutable snapshot until a complete replacement has validated.
+- Never allow completion order, callback timing, filesystem order, or task scheduling to become hidden behavioural authority.
+
+### Persistence and recovery
+
+- Do not present success until the durable write has succeeded and the accepted runtime state reflects it.
+- Persistence, undo, reset, and reload failures must be visible and recoverable; logging alone is insufficient when the UI claims success.
+- Durable behaviour requires a durable, appropriately scoped reset or recovery path.
+- Retries and interrupted operations must be idempotent where repetition is possible.
+
+### Required proof
+
+Happy-path tests are not sufficient for behaviour-changing code. Add focused deterministic coverage for every applicable case:
+
+- stale work completing after a newer mutation;
+- cancellation and interruption;
+- persistence failure followed by retry;
+- equivalent identity or sibling representations;
+- dismiss and inspect paths remaining side-effect free;
+- undo and reset durability;
+- preservation of unrelated routes, sources, and accepted state.
+
+For UI, speech, permissions, or lifecycle behaviour, verify the signed application bundle. A change is not complete until the pull request identifies the evidence for each changed behaviour and clearly states any remaining unverified boundary.
+
 ## Verify
 
 ```bash
@@ -52,3 +91,5 @@ Use the signed bundle for UI and speech testing, not the raw SwiftPM executable.
 - Never commit personal data, snapshots, caches, model output, credentials, absolute user paths, or `.swiftpm/xcode/xcuserdata`.
 - Use synthetic or bundled fixture data in tests.
 - Current code and tests are authoritative.
+- `TheKontextCo/embers` is the canonical repository and must remain `origin`.
+- `TheKontextCo/embers-private-backup` is archival backup only. Never fetch from it, branch from it, push to it, open or update pull requests there, or use it as implementation evidence unless the user explicitly requests backup recovery.
