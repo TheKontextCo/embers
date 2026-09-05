@@ -479,6 +479,46 @@ final class VoiceRoutingTests: XCTestCase {
         XCTAssertEqual(router.matches(in: "Journal").map(\.target.title), ["Journal"])
     }
 
+    func testRouteExclusionBlocksEquivalentPhraseAndOrderedSiblingsOnlyForThatNode() {
+        let pack = makePack(cards: [
+            makeCard(
+                id: "mission",
+                title: "Mission",
+                activeTriggers: [
+                    .init(pattern: .phrase("moon mission"), origin: .phraseFamily, score: 0.94),
+                    .init(
+                        pattern: .orderedTerms(["moon", "mission"], maximumGap: 2),
+                        origin: .phraseFamily,
+                        score: 0.92
+                    ),
+                    .init(pattern: .phrase("lunar mission"), origin: .semanticAlias, score: 0.91),
+                ]
+            ),
+            makeCard(
+                id: "journal",
+                title: "Journal",
+                activeTriggers: [
+                    .init(pattern: .phrase("journal"), origin: .canonicalName, score: 1),
+                ]
+            ),
+        ])
+        let exclusion = VoiceRouteExclusionKey(
+            sourceID: "folder:a",
+            nodeID: "mission",
+            pattern: .init(kind: .phrase, normalizedTerms: ["moon", "mission"])
+        )
+        let router = VoiceRoutingRuntimeRouter(
+            baseTargets: [],
+            pack: pack,
+            excludedRouteKeys: [exclusion]
+        )
+
+        XCTAssertTrue(router.matches(in: "moon mission").isEmpty)
+        XCTAssertTrue(router.matches(in: "moon about mission").isEmpty)
+        XCTAssertEqual(router.matches(in: "lunar mission").map(\.target.title), ["Mission"])
+        XCTAssertEqual(router.matches(in: "journal").map(\.target.title), ["Journal"])
+    }
+
     func testSharedConceptExclusionRemovesOnlyTheRejectedCandidate() {
         let pattern = VoiceRoutingTriggerPattern.phrase("knowledge system")
         var pack = makePack(cards: [

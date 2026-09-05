@@ -34,6 +34,20 @@ public protocol VoiceLearningPersistence: Sendable {
     func delete() throws
 }
 
+public protocol VoiceLearningStoring: Sendable {
+    func snapshot(sourceIDs: Set<String>) async throws -> VoiceLearningSnapshot
+    func recordExclusion(
+        _ key: VoiceRouteExclusionKey,
+        at date: Date,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot
+    func removeExclusion(
+        _ key: VoiceRouteExclusionKey,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot
+    func delete(sourceID: String, sourceGeneration: UInt64) async throws
+}
+
 public struct FileVoiceLearningPersistence: VoiceLearningPersistence, Sendable {
     public let fileURL: URL
 
@@ -201,6 +215,8 @@ public actor VoiceLearningStore {
         ].joined(separator: "\u{1e}")
     }
 }
+
+extension VoiceLearningStore: VoiceLearningStoring {}
 
 public enum VoiceLearningStoreError: Error {
     case invalidExclusion

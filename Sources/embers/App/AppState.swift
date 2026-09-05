@@ -27,6 +27,12 @@ final class AppState: ObservableObject {
         },
         openContextLens: { [weak self] sourceID in
             self?.openContextLens(for: sourceID)
+        },
+        canResetVoiceFeedback: { [weak self] sourceID in
+            self?.voiceLearning.canReset(sourceID: sourceID.rawValue) ?? false
+        },
+        resetVoiceFeedback: { [weak self] sourceID in
+            self?.voiceLearning.reset(sourceID: sourceID.rawValue)
         }
     )
     let peeks: PeekQueue
@@ -294,19 +300,17 @@ final class AppState: ObservableObject {
         keys.stop()
     }
 
-    private func handleKey(_ key: KeyMonitor.Key) {
+    func handleKey(_ key: KeyMonitor.Key) {
         switch key {
         case .escape:
-            if !rejectActivePeekJourney() {
-                dash.selected != nil ? dash.back() : closeNotch()
-            }
+            dash.selected != nil ? dash.back() : closeNotch()
         case .left: if dash.selected != nil { dash.back() }
         case .right, .up, .down: break
         }
     }
 
-    /// Handles the one-shot negative signal shared by right-click and focused
-    /// Escape. Returning true means the event belonged to an active Peek route.
+    /// Handles the one-shot negative signal from an explicit right-click.
+    /// Returning true means the event belonged to an active Peek route.
     @discardableResult
     func rejectActivePeekJourney() -> Bool {
         guard let journey = voiceLearning.consumeJourney() else { return false }

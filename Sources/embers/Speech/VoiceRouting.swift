@@ -559,7 +559,7 @@ struct VoiceRoutingRuntimeRouter {
     /// lookup so every transcript check remains constant-time.
     private struct ExcludedRouteIdentity: Hashable {
         var nodeID: String
-        var pattern: VoiceRoutePatternIdentity
+        var normalizedTerms: [String]
     }
 
     struct Evaluation {
@@ -618,7 +618,7 @@ struct VoiceRoutingRuntimeRouter {
         targetsByNodeID = targetByNodeID
         self.preferenceBoosts = preferenceBoosts
         excludedRoutes = Set(excludedRouteKeys.map {
-            ExcludedRouteIdentity(nodeID: $0.nodeID, pattern: $0.pattern)
+            ExcludedRouteIdentity(nodeID: $0.nodeID, normalizedTerms: $0.pattern.normalizedTerms)
         })
     }
 
@@ -733,7 +733,10 @@ struct VoiceRoutingRuntimeRouter {
         for rule in rules {
             guard case .node(let nodeID) = rule.target.ref else { continue }
             let patternIdentity = rule.trigger.pattern.routePatternIdentity
-            guard !excludedRoutes.contains(.init(nodeID: nodeID, pattern: patternIdentity)) else {
+            guard !excludedRoutes.contains(.init(
+                nodeID: nodeID,
+                normalizedTerms: patternIdentity.normalizedTerms
+            )) else {
                 continue
             }
             let score = min(max(rule.trigger.score, 0), 1)
@@ -830,7 +833,10 @@ struct VoiceRoutingRuntimeRouter {
                 boost: Double
             )? in
                 let patternIdentity = concept.pattern.routePatternIdentity
-                guard !excludedRoutes.contains(.init(nodeID: edge.nodeID, pattern: patternIdentity)),
+                guard !excludedRoutes.contains(.init(
+                    nodeID: edge.nodeID,
+                    normalizedTerms: patternIdentity.normalizedTerms
+                )),
                       edge.origin.isDeterministicIdentity || !blockedNodeIDs.contains(edge.nodeID),
                       edge.compiledStrength >= VoiceRoutingScorer.minimumScore,
                       let base = targetsByNodeID[edge.nodeID] else { return nil }

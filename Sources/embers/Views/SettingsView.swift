@@ -254,6 +254,11 @@ struct SettingsView: View {
                                 vm.openContextLens(source.descriptor.id)
                             }
                             .disabled(!vm.canOpenContextLens(source.descriptor.id))
+                            if vm.canResetVoiceFeedback(source.descriptor.id) {
+                                Button("Reset voice feedback", role: .destructive) {
+                                    vm.resetVoiceFeedback(source.descriptor.id)
+                                }
+                            }
                             Divider()
                             Button("Refresh") { Task { await context.refresh(source.descriptor.id) } }
                             if !context.diagnostics.isEmpty {

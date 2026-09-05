@@ -1,8 +1,9 @@
 import EmbersCore
+import EmbersLocal
 import Foundation
 
 struct ContextLensDocument: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     struct Source: Codable, Equatable, Sendable {
         var id: String
@@ -45,6 +46,12 @@ struct ContextLensDeterministicDecision: Codable, Equatable, Sendable {
     var acceptedTriggers: [VoiceRoutingTrigger]
     var rejectedTriggers: [VoiceRoutingRejectedTrigger]
     var sharedConcepts: [VoiceRoutingSharedConcept]
+    var routingExclusions: [ContextLensRoutingExclusion] = []
+}
+
+struct ContextLensRoutingExclusion: Codable, Equatable, Sendable {
+    var pattern: VoiceRoutePatternIdentity
+    var rejectedAt: Date
 }
 
 /// Capturing a request only checks readiness. UI availability must never build
@@ -56,6 +63,7 @@ struct ContextLensRequest: Sendable {
     let graph: ContextGraph
     let snapshot: ContextSnapshot
     let pack: VoiceRoutingPack?
+    let learning: VoiceLearningSnapshot
 
     init?(
         sourceID: String,
@@ -63,7 +71,8 @@ struct ContextLensRequest: Sendable {
         sourceSnapshot: ContextSnapshot?,
         graph: ContextGraph?,
         snapshot: ContextSnapshot?,
-        pack: VoiceRoutingPack?
+        pack: VoiceRoutingPack?,
+        learning: VoiceLearningSnapshot = .empty
     ) {
         guard let sourceSnapshot, let graph, let snapshot,
               graph.revision == snapshot.revision,
@@ -74,12 +83,14 @@ struct ContextLensRequest: Sendable {
         self.graph = graph
         self.snapshot = snapshot
         self.pack = pack
+        self.learning = learning
     }
 
     func build() -> ContextLensDocument? {
         ContextLensDocumentBuilder().build(
             sourceID: sourceID, sourceName: sourceName,
-            sourceSnapshot: sourceSnapshot, graph: graph, snapshot: snapshot, pack: pack
+            sourceSnapshot: sourceSnapshot, graph: graph, snapshot: snapshot, pack: pack,
+            learning: learning
         )
     }
 }
@@ -91,7 +102,8 @@ struct ContextLensDocumentBuilder: Sendable {
         sourceSnapshot: ContextSnapshot?,
         graph: ContextGraph,
         snapshot: ContextSnapshot,
-        pack: VoiceRoutingPack?
+        pack: VoiceRoutingPack?,
+        learning: VoiceLearningSnapshot = .empty
     ) -> ContextLensDocument? {
         guard graph.revision == snapshot.revision,
               pack == nil || pack?.graphRevision == graph.revision,
@@ -112,6 +124,22 @@ struct ContextLensDocumentBuilder: Sendable {
             let sharedConcepts = (pack?.sharedConcepts ?? []).filter { concept in
                 concept.candidates.contains { $0.nodeID == nodeID }
             }
+            let routingExclusions = learning.exclusions.values
+                .filter { exclusion in
+                    exclusion.key.sourceID == sourceID && exclusion.key.nodeID == nodeID
+                }
+                .sorted { lhs, rhs in
+                    if lhs.rejectedAt != rhs.rejectedAt { return lhs.rejectedAt > rhs.rejectedAt }
+                    if lhs.key.pattern.normalizedTerms != rhs.key.pattern.normalizedTerms {
+                        return lhs.key.pattern.normalizedTerms.lexicographicallyPrecedes(
+                            rhs.key.pattern.normalizedTerms
+                        )
+                    }
+                    return lhs.key.pattern.kind.rawValue < rhs.key.pattern.kind.rawValue
+                }
+                .map {
+                    ContextLensRoutingExclusion(pattern: $0.key.pattern, rejectedAt: $0.rejectedAt)
+                }
             return ContextLensEntry(
                 nodeID: nodeID,
                 title: seed.canonicalName,
@@ -131,7 +159,8 @@ struct ContextLensDocumentBuilder: Sendable {
                     baselineMatches: baseline.decisions.filter { $0.nodeID == nodeID },
                     acceptedTriggers: card?.activeTriggers ?? [],
                     rejectedTriggers: card?.rejectedTriggers ?? [],
-                    sharedConcepts: sharedConcepts
+                    sharedConcepts: sharedConcepts,
+                    routingExclusions: routingExclusions
                 )
             )
         }.sorted {

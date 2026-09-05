@@ -22,6 +22,8 @@ final class DashboardViewModel: ObservableObject {
     private let chooseDirectoryAction: (PluginIdentifier) -> Void
     private let canOpenContextLensAction: (PluginSourceIdentifier) -> Bool
     private let openContextLensAction: (PluginSourceIdentifier) -> Void
+    private let canResetVoiceFeedbackAction: (PluginSourceIdentifier) -> Bool
+    private let resetVoiceFeedbackAction: (PluginSourceIdentifier) -> Void
     private var collaboratorChanges = Set<AnyCancellable>()
 
     init(
@@ -34,7 +36,9 @@ final class DashboardViewModel: ObservableObject {
         willNavigateManually: @escaping () -> Void = {},
         chooseDirectory: @escaping (PluginIdentifier) -> Void,
         canOpenContextLens: @escaping (PluginSourceIdentifier) -> Bool = { _ in false },
-        openContextLens: @escaping (PluginSourceIdentifier) -> Void = { _ in }
+        openContextLens: @escaping (PluginSourceIdentifier) -> Void = { _ in },
+        canResetVoiceFeedback: @escaping (PluginSourceIdentifier) -> Bool = { _ in false },
+        resetVoiceFeedback: @escaping (PluginSourceIdentifier) -> Void = { _ in }
     ) {
         self.context = context
         self.speech = speech
@@ -46,6 +50,8 @@ final class DashboardViewModel: ObservableObject {
         self.chooseDirectoryAction = chooseDirectory
         self.canOpenContextLensAction = canOpenContextLens
         self.openContextLensAction = openContextLens
+        self.canResetVoiceFeedbackAction = canResetVoiceFeedback
+        self.resetVoiceFeedbackAction = resetVoiceFeedback
 
         navigation.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
@@ -108,6 +114,12 @@ final class DashboardViewModel: ObservableObject {
     }
     func openContextLens(_ sourceID: PluginSourceIdentifier) {
         openContextLensAction(sourceID)
+    }
+    func canResetVoiceFeedback(_ sourceID: PluginSourceIdentifier) -> Bool {
+        canResetVoiceFeedbackAction(sourceID)
+    }
+    func resetVoiceFeedback(_ sourceID: PluginSourceIdentifier) {
+        resetVoiceFeedbackAction(sourceID)
     }
     func toggleListening() { if speech.isListening { speech.stop() } else { Task { await speech.startFromUserAction() } } }
     func resetVoiceRoutingPreferences() { voiceRoutingPreferences.beginReset() }

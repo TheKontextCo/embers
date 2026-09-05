@@ -110,7 +110,8 @@ final class VoiceRoutingCoordinator {
             sourceSnapshot: sourceSnapshot,
             graph: context.graph,
             snapshot: context.snapshot,
-            pack: routingPack
+            pack: routingPack,
+            learning: learning.snapshot
         )
     }
 

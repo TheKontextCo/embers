@@ -139,9 +139,11 @@ struct RootView: View {
             if let notice = voiceLearning.notice {
                 HStack(spacing: 8) {
                     Text(notice.message)
-                    Button("Undo") { app.undoVoiceRejection() }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Style.emberSolid)
+                    if notice.canUndo {
+                        Button("Undo") { app.undoVoiceRejection() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Style.emberSolid)
+                    }
                 }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))

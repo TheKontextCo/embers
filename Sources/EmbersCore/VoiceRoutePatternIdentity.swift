@@ -41,8 +41,9 @@ public struct VoiceRoutePatternIdentity: Codable, Hashable, Sendable {
     }
 }
 
-/// One narrow user-authored exclusion. The same pattern remains available for
-/// other nodes, and other patterns remain available for this node.
+/// One exact user-authored evidence record. Runtime enforcement groups equivalent
+/// phrase and ordered-term forms for this node while preserving other spoken
+/// families and the same family for other nodes.
 public struct VoiceRouteExclusionKey: Codable, Hashable, Sendable {
     public var sourceID: String
     public var nodeID: String
