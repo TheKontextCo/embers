@@ -37,14 +37,14 @@ embers (UI / speech / composition)
 
 ## Behaviour-change gate
 
-Before implementing any change that affects user-visible behaviour, persistent state, routing, permissions, or recovery, define the complete behavioural contract.
+This gate applies to agents implementing changes in this repository. Before implementing any change that affects user-visible behaviour, persistent state, routing, permissions, or recovery, define the complete behavioural contract.
 
-- Classify every relevant input as **mutate**, **dismiss**, **inspect**, or **undo**. Neutral actions must never create durable learning or other side effects.
+- Classify every relevant input by semantic event. At minimum, distinguish explicit choice or mutation, passive presentation, automatic open, abstention, retraction, dismiss, inspect, undo, and durable reset. Declare which events may write or teach. Presentation, automatic open, abstention, retraction, dismiss, and inspect are neutral and must never create durable learning or other side effects. Feature-specific operating models such as `docs/VOICE_HIT_DETECTION.md` are authoritative where they define a more precise contract.
 - Identify the authoritative state, persisted state, derived snapshots, and all asynchronous work that can publish into them.
 - Define the canonical identity of the behaviour and any equivalent representations that must share the same result.
 - Define when the operation has genuinely succeeded, how failure is shown, and how retry, cancellation, interruption, undo, and reset behave.
 - Define the scope of durable changes. Learning, reset, and recovery must be scoped to the correct source, context, or provider.
-- Expose every deterministic decision that materially changes results through Context Lens or the appropriate inspection surface.
+- Keep Context Lens scoped to optional model work: bounded inputs, model proposals, and deterministic accept-or-reject decisions. Expose other deterministic runtime decisions through their domain-specific inspectable state, artifacts, or privacy-safe logs.
 
 ### State and concurrency
 
@@ -68,7 +68,7 @@ Happy-path tests are not sufficient for behaviour-changing code. Add focused det
 - cancellation and interruption;
 - persistence failure followed by retry;
 - equivalent identity or sibling representations;
-- dismiss and inspect paths remaining side-effect free;
+- explicit choices that are intended to teach or mutate doing so, while presentation, automatic open, abstention, retraction, dismiss, and inspect remain side-effect free;
 - undo and reset durability;
 - preservation of unrelated routes, sources, and accepted state.
 
