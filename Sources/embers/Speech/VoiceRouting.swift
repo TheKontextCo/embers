@@ -1273,133 +1273,174 @@ struct VoiceRoutingQualityGate: Sendable {
     }
 
     func evaluate(pack: VoiceRoutingPack, expectedNodeCount: Int) -> Result {
+        var diagnostics = Diagnostics()
+        let routers = makeRoutersAndValidateStructure(pack, diagnostics: &diagnostics)
+        validateSharedConcepts(pack, router: routers.runtime, diagnostics: &diagnostics)
+        let coverage = validateCardRoutes(
+            pack,
+            expectedNodeCount: expectedNodeCount,
+            router: routers.runtime,
+            diagnostics: &diagnostics
+        )
+        validateNegativeBoundaries(pack, router: routers.proposal, diagnostics: &diagnostics)
+        validateRegressionCorpus(pack, routers: routers, diagnostics: &diagnostics)
+        return .init(
+            passed: diagnostics.failures.isEmpty,
+            coverage: coverage,
+            failures: Array(Set(diagnostics.failures)).sorted(),
+            warnings: Array(Set(diagnostics.warnings)).sorted()
+        )
+    }
+
+    private struct Diagnostics {
         var failures: [String] = []
         var warnings: [String] = []
-        if Set(pack.cards.map(\.nodeID)).count != pack.cards.count { failures.append("duplicate node cards") }
-        if !pack.isStructurallyValid { failures.append("routing pack is structurally invalid") }
+    }
 
-        let baseTargets = pack.cards.flatMap { card in
-            card.canonicalPhrases.map {
-                MatchTarget(phrase: $0, ref: .node(card.nodeID), title: card.title)
-            }
+    private func makeRoutersAndValidateStructure(_ pack: VoiceRoutingPack, diagnostics: inout Diagnostics) -> (
+        runtime: VoiceRoutingRuntimeRouter,
+        proposal: VoiceRoutingRuntimeRouter
+    ) {
+        if Set(pack.cards.map(\.nodeID)).count != pack.cards.count {
+            diagnostics.failures.append("duplicate node cards")
         }
-        let router = VoiceRoutingRuntimeRouter(baseTargets: baseTargets, pack: pack)
-        let proposalRouter = VoiceRoutingRuntimeRouter(baseTargets: [], pack: pack)
+        if !pack.isStructurallyValid {
+            diagnostics.failures.append("routing pack is structurally invalid")
+        }
+        let targets = pack.cards.flatMap { card in
+            card.canonicalPhrases.map { MatchTarget(phrase: $0, ref: .node(card.nodeID), title: card.title) }
+        }
+        return (
+            VoiceRoutingRuntimeRouter(baseTargets: targets, pack: pack),
+            VoiceRoutingRuntimeRouter(baseTargets: [], pack: pack)
+        )
+    }
+
+    private func validateSharedConcepts(
+        _ pack: VoiceRoutingPack,
+        router: VoiceRoutingRuntimeRouter,
+        diagnostics: inout Diagnostics
+    ) {
         for concept in pack.sharedConcepts {
-            if pack.cards.contains(where: { card in
-                card.activeTriggers.contains {
-                    VoiceRoutingSharedConcept.stableID(for: $0.pattern) == concept.id
-                }
-            }) {
-                failures.append("shared concept also exists as an active trigger: \(concept.id)")
+            let existsAsTrigger = pack.cards.contains { card in
+                card.activeTriggers.contains { VoiceRoutingSharedConcept.stableID(for: $0.pattern) == concept.id }
             }
-            let utterance: String = switch concept.pattern {
-            case .phrase(let phrase): phrase
-            case .orderedTerms(let terms, _): terms.joined(separator: " about ")
+            if existsAsTrigger {
+                diagnostics.failures.append("shared concept also exists as an active trigger: \(concept.id)")
             }
-            let runtimeConcept = router.sharedMatches(in: utterance).first { $0.conceptID == concept.id }
+            let runtimeConcept = router.sharedMatches(in: utterance(for: concept.pattern)).first { $0.conceptID == concept.id }
             let compiledNodeIDs = Set(concept.candidates.map(\.nodeID))
             let presentedNodeIDs = runtimeConcept?.candidateNodeIDs ?? []
-            if runtimeConcept == nil
-                || !presentedNodeIDs.isSubset(of: compiledNodeIDs)
+            if runtimeConcept == nil || !presentedNodeIDs.isSubset(of: compiledNodeIDs)
                 || presentedNodeIDs.count != min(3, compiledNodeIDs.count) {
-                failures.append("shared concept did not preserve its compiled candidates: \(concept.id)")
+                diagnostics.failures.append("shared concept did not preserve its compiled candidates: \(concept.id)")
             }
-            for edge in concept.candidates {
-                if VoiceRoutingSharedConceptValidator().validate(
-                    candidate: edge,
-                    concept: concept,
-                    pack: pack
-                ).outcome != .accepted {
-                    failures.append("shared concept candidate did not independently route: \(concept.id):\(edge.nodeID)")
-                }
+            for edge in concept.candidates where VoiceRoutingSharedConceptValidator().validate(
+                candidate: edge,
+                concept: concept,
+                pack: pack
+            ).outcome != .accepted {
+                diagnostics.failures.append("shared concept candidate did not independently route: \(concept.id):\(edge.nodeID)")
             }
         }
-        let canonicallyValidatedNodeIDs = Set(pack.cards.compactMap { card -> String? in
+    }
+
+    private func validateCardRoutes(
+        _ pack: VoiceRoutingPack,
+        expectedNodeCount: Int,
+        router: VoiceRoutingRuntimeRouter,
+        diagnostics: inout Diagnostics
+    ) -> Double {
+        let validatedNodeIDs = Set(pack.cards.compactMap { card -> String? in
             guard let canonical = card.canonicalPhrases.first,
                   router.validate(utterance: canonical, expectedNodeID: card.nodeID).outcome == .accepted else {
                 return nil
             }
             return card.nodeID
         })
-        let coverage = expectedNodeCount > 0
-            ? Double(canonicallyValidatedNodeIDs.count) / Double(expectedNodeCount)
-            : 0
-        if coverage < 0.80 { failures.append("validated card coverage below 80%") }
+        let coverage = expectedNodeCount > 0 ? Double(validatedNodeIDs.count) / Double(expectedNodeCount) : 0
+        if coverage < 0.80 { diagnostics.failures.append("validated card coverage below 80%") }
         for card in pack.cards {
             if let canonical = card.canonicalPhrases.first,
                router.validate(utterance: canonical, expectedNodeID: card.nodeID).outcome != .accepted {
-                failures.append("canonical phrase did not uniquely route for \(card.nodeID)")
+                diagnostics.failures.append("canonical phrase did not uniquely route for \(card.nodeID)")
             }
-            for trigger in card.activeTriggers {
-                let utterance: String = switch trigger.pattern {
-                case .phrase(let phrase): phrase
-                case .orderedTerms(let terms, _): terms.joined(separator: " about ")
-                }
-                if router.validate(utterance: utterance, expectedNodeID: card.nodeID).outcome != .accepted {
-                    failures.append("active trigger did not uniquely route for \(card.nodeID)")
-                    break
-                }
+            for trigger in card.activeTriggers where router.validate(
+                utterance: utterance(for: trigger.pattern),
+                expectedNodeID: card.nodeID
+            ).outcome != .accepted {
+                diagnostics.failures.append("active trigger did not uniquely route for \(card.nodeID)")
+                break
             }
         }
+        return coverage
+    }
+
+    private func validateNegativeBoundaries(
+        _ pack: VoiceRoutingPack,
+        router: VoiceRoutingRuntimeRouter,
+        diagnostics: inout Diagnostics
+    ) {
         for card in pack.cards {
-            for phrase in card.hardNegatives {
-                if !proposalRouter.matches(in: phrase).isEmpty || !proposalRouter.sharedMatches(in: phrase).isEmpty {
-                    failures.append("hard negative did not globally abstain for \(card.nodeID)")
-                    break
-                }
+            for phrase in card.hardNegatives where !router.matches(in: phrase).isEmpty || !router.sharedMatches(in: phrase).isEmpty {
+                diagnostics.failures.append("hard negative did not globally abstain for \(card.nodeID)")
+                break
             }
-            for phrase in card.confusableConcepts {
-                let uniquelyRoutedToOwner = proposalRouter.matches(in: phrase).contains(where: { match in
-                    guard case .node(let nodeID) = match.target.ref else { return false }
-                    return nodeID == card.nodeID
-                })
-                let sharedWithOwner = proposalRouter.sharedMatches(in: phrase).contains {
-                    $0.candidateNodeIDs.contains(card.nodeID)
-                }
-                if uniquelyRoutedToOwner || sharedWithOwner {
-                    failures.append("confuser routed to its owner \(card.nodeID)")
-                    break
-                }
+            for phrase in card.confusableConcepts where routesToOwner(phrase, card: card, router: router) {
+                diagnostics.failures.append("confuser routed to its owner \(card.nodeID)")
+                break
             }
         }
+    }
+
+    private func routesToOwner(
+        _ phrase: String,
+        card: VoiceRoutingCard,
+        router: VoiceRoutingRuntimeRouter
+    ) -> Bool {
+        let uniquelyRouted = router.matches(in: phrase).contains { match in
+            guard case .node(let nodeID) = match.target.ref else { return false }
+            return nodeID == card.nodeID
+        }
+        return uniquelyRouted || router.sharedMatches(in: phrase).contains { $0.candidateNodeIDs.contains(card.nodeID) }
+    }
+
+    private func validateRegressionCorpus(
+        _ pack: VoiceRoutingPack,
+        routers: (runtime: VoiceRoutingRuntimeRouter, proposal: VoiceRoutingRuntimeRouter),
+        diagnostics: inout Diagnostics
+    ) {
         for _ in 0..<3 {
             for regression in VoiceRoutingRegressionCorpus.positive {
                 guard let card = pack.cards.first(where: {
                     PhraseMatcher.normalize($0.title) == regression.canonicalTitle
                 }) else { continue }
-                let evaluation = router.evaluate(in: regression.utterance)
-                if evaluation.sharedConcepts.contains(where: {
-                    $0.candidateNodeIDs.contains(card.nodeID)
-                }) {
-                    continue
-                }
+                let evaluation = routers.runtime.evaluate(in: regression.utterance)
+                if evaluation.sharedConcepts.contains(where: { $0.candidateNodeIDs.contains(card.nodeID) }) { continue }
                 if !evaluation.sharedConcepts.isEmpty {
-                    failures.append("fixed recall regression routed unsafely for \(card.nodeID): \(regression.utterance)")
+                    diagnostics.failures.append("fixed recall regression routed unsafely for \(card.nodeID): \(regression.utterance)")
                     continue
                 }
-                let result = router.validate(utterance: regression.utterance, expectedNodeID: card.nodeID)
-                switch result.outcome {
-                case .accepted:
-                    break
+                switch routers.runtime.validate(utterance: regression.utterance, expectedNodeID: card.nodeID).outcome {
+                case .accepted: break
                 case .abstained, .blockedByNegative:
-                    warnings.append("fixed recall regression missed for \(card.nodeID): \(regression.utterance)")
+                    diagnostics.warnings.append("fixed recall regression missed for \(card.nodeID): \(regression.utterance)")
                 case .ambiguous, .wrongWinner:
-                    failures.append("fixed recall regression routed unsafely for \(card.nodeID): \(regression.utterance)")
+                    diagnostics.failures.append("fixed recall regression routed unsafely for \(card.nodeID): \(regression.utterance)")
                 }
             }
-            for utterance in VoiceRoutingRegressionCorpus.negative {
-                if !proposalRouter.matches(in: utterance).isEmpty || !proposalRouter.sharedMatches(in: utterance).isEmpty {
-                    failures.append("generic regression did not abstain: \(utterance)")
-                }
+            for utterance in VoiceRoutingRegressionCorpus.negative where !routers.proposal.matches(in: utterance).isEmpty
+                || !routers.proposal.sharedMatches(in: utterance).isEmpty {
+                diagnostics.failures.append("generic regression did not abstain: \(utterance)")
             }
         }
-        return .init(
-            passed: failures.isEmpty,
-            coverage: coverage,
-            failures: Array(Set(failures)).sorted(),
-            warnings: Array(Set(warnings)).sorted()
-        )
+    }
+
+    private func utterance(for pattern: VoiceRoutingTriggerPattern) -> String {
+        switch pattern {
+        case .phrase(let phrase): phrase
+        case .orderedTerms(let terms, _): terms.joined(separator: " about ")
+        }
     }
 }
 

@@ -37,6 +37,7 @@ final class FolderPipelineTests: XCTestCase {
         var enumerationError: Error?
         var readErrorURLs = Set<URL>()
         var becomesUnavailableAfterEnumeration = false
+        private(set) var directives: [URL: FolderTraversalDirective] = [:]
 
         init(entries: [FolderFileEntry], data: [URL: Data]) {
             self.entries = entries
@@ -47,7 +48,7 @@ final class FolderPipelineTests: XCTestCase {
 
         func enumerate(at rootURL: URL, visit: (FolderFileEntry) throws -> FolderTraversalDirective) throws {
             for entry in entries {
-                _ = try visit(entry)
+                directives[entry.url] = try visit(entry)
             }
             if becomesUnavailableAfterEnumeration { available = false }
             if let enumerationError { throw enumerationError }
@@ -62,6 +63,103 @@ final class FolderPipelineTests: XCTestCase {
 
     private func entry(_ url: URL, bytes: Int? = nil) -> FolderFileEntry {
         .init(url: url, isDirectory: false, isRegularFile: true, isSymbolicLink: false, fileSize: bytes ?? 12, contentModificationDate: .now)
+    }
+
+    private struct SelectivelyFailingParser: ContextParser {
+        func parse(_ input: ParseInput) throws -> ParsedDocument {
+            if input.relativePath == "Bad.md" { throw ScanFailure() }
+            return try MarkdownTextParser().parse(input)
+        }
+    }
+
+    private final class RecordingParser: ContextParser, @unchecked Sendable {
+        private(set) var paths: [String] = []
+
+        func reset() { paths.removeAll() }
+
+        func parse(_ input: ParseInput) throws -> ParsedDocument {
+            paths.append(input.relativePath)
+            return try MarkdownTextParser().parse(input)
+        }
+    }
+
+    func testScanCanonicalizesContentOrderAndSkipsSymlinkAndIgnoredDirectories() async throws {
+        let root = URL(fileURLWithPath: "/synthetic-vault", isDirectory: true)
+        let ignored = root.appendingPathComponent(".git", isDirectory: true)
+        let symlink = root.appendingPathComponent("linked", isDirectory: true)
+        let alpha = root.appendingPathComponent("Alpha.md")
+        let beta = root.appendingPathComponent("Beta.md")
+        let scanner = SyntheticScanner(entries: [
+            entry(beta),
+            .init(url: ignored, isDirectory: true, isRegularFile: false, isSymbolicLink: false, fileSize: 0, contentModificationDate: nil),
+            .init(url: symlink, isDirectory: true, isRegularFile: false, isSymbolicLink: true, fileSize: 0, contentModificationDate: nil),
+            entry(alpha),
+        ], data: [alpha: Data("# Alpha".utf8), beta: Data("# Beta".utf8)])
+
+        let scan = try await FolderContextSource(sourceID: "fixture", rootURL: root, scanner: scanner, cancellationCheck: {}).scan()
+
+        XCTAssertEqual(scan.artifacts.map(\.relativePath), ["Alpha.md", "Beta.md"])
+        XCTAssertEqual(scanner.directives[ignored], .skipDescendants)
+        XCTAssertEqual(scanner.directives[symlink], .skipDescendants)
+    }
+
+    func testParseFailureWarnsAndKeepsOtherArtifacts() async throws {
+        let root = URL(fileURLWithPath: "/synthetic-vault", isDirectory: true)
+        let bad = root.appendingPathComponent("Bad.md")
+        let good = root.appendingPathComponent("Good.md")
+        let scanner = SyntheticScanner(entries: [entry(bad), entry(good)], data: [
+            bad: Data("# Bad".utf8), good: Data("# Good".utf8),
+        ])
+
+        let scan = try await FolderContextSource(sourceID: "fixture", rootURL: root,
+            parser: SelectivelyFailingParser(), scanner: scanner, cancellationCheck: {}).scan()
+
+        XCTAssertEqual(scan.artifacts.map(\.relativePath), ["Good.md"])
+        XCTAssertEqual(scan.diagnostics.filter { $0.path == "Bad.md" }.map(\.severity), [.warning])
+    }
+
+    func testUnderreportedContentBytesFailBeforeParsing() async throws {
+        let root = URL(fileURLWithPath: "/synthetic-vault", isDirectory: true)
+        let note = root.appendingPathComponent("Note.md")
+        let oversized = Data(repeating: 0x20, count: FolderContextSource.maximumParsedBytes + 1)
+        let source = FolderContextSource(sourceID: "fixture", rootURL: root,
+            scanner: SyntheticScanner(entries: [entry(note, bytes: 0)], data: [note: oversized]), cancellationCheck: {})
+
+        do {
+            _ = try await source.scan()
+            XCTFail("Expected the read-time content bound to reject the scan")
+        } catch let error as FolderSourceError {
+            guard case .fileReadFailed = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+    }
+
+    func testFailedScanDoesNotPublishPartialParseCache() async throws {
+        let root = URL(fileURLWithPath: "/synthetic-vault", isDirectory: true)
+        let alpha = root.appendingPathComponent("Alpha.md")
+        let beta = root.appendingPathComponent("Beta.md")
+        let scanner = SyntheticScanner(entries: [entry(alpha), entry(beta)], data: [
+            alpha: Data("# Alpha old".utf8), beta: Data("# Beta old".utf8),
+        ])
+        let parser = RecordingParser()
+        let source = FolderContextSource(sourceID: "fixture", rootURL: root, parser: parser, scanner: scanner, cancellationCheck: {})
+        _ = try await source.scan()
+
+        scanner.data[alpha] = Data("# Alpha new".utf8)
+        scanner.data[beta] = Data("# Beta new".utf8)
+        parser.reset()
+        scanner.readErrorURLs = [beta]
+        do {
+            _ = try await source.scan()
+            XCTFail("Expected the failed read to reject the scan")
+        } catch {
+            XCTAssertTrue(error is FolderSourceError)
+        }
+        XCTAssertEqual(parser.paths, ["Alpha.md"])
+
+        parser.reset()
+        scanner.readErrorURLs = []
+        _ = try await source.scan()
+        XCTAssertEqual(parser.paths, ["Alpha.md", "Beta.md"])
     }
 
     func testScanFailsClosedAtFileAndParsedByteLimits() async throws {

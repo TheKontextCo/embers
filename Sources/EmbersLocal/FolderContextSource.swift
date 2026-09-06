@@ -157,6 +157,30 @@ public final class FolderContextSource: ContextSource, @unchecked Sendable {
         var modified: Date
         var document: ParsedDocument
     }
+    private struct ScanCandidate {
+        var url: URL
+        var relativePath: String
+        var advertisedBytes: Int
+        var modificationDate: Date?
+    }
+    private struct ScanDiscovery {
+        var textFiles: [ScanCandidate]
+        var allFiles: [String: (URL, Date?)]
+        var manifest: ContextManifest?
+        var manifestParsedBytes: Int
+        var diagnostics: [ContextDiagnostic]
+    }
+    private struct DiscoveryState {
+        var discovery = ScanDiscovery(textFiles: [], allFiles: [:], manifest: nil, manifestParsedBytes: 0, diagnostics: [])
+        var regularFileCount = 0
+        var totalAdvertisedBytes = 0
+    }
+    private struct ParsedCandidates {
+        var artifacts: [SourceArtifact]
+        var referencedPaths: Set<String>
+        var parsedFiles: [String: CachedParse]
+        var diagnostics: [ContextDiagnostic]
+    }
     private var parsedFiles: [String: CachedParse] = [:]
     private var lastScan: SourceScan?
     private var lastRawArtifacts: [SourceArtifact] = []
@@ -227,126 +251,144 @@ public final class FolderContextSource: ContextSource, @unchecked Sendable {
     }
 
     private func scanFiles() throws -> SourceScan {
+        let discovery = try discoverCandidates()
+        let parsed = try parseCandidates(discovery)
+        var artifacts = parsed.artifacts
+        var diagnostics = discovery.diagnostics + parsed.diagnostics
+        appendReferencedArtifacts(to: &artifacts, referencedPaths: parsed.referencedPaths, allFiles: discovery.allFiles)
+        repairDuplicateArtifactIDs(in: &artifacts, diagnostics: &diagnostics)
+        let normalizedArtifacts = normalizer.normalize(artifacts)
+        let scan = makeScan(artifacts: normalizedArtifacts, manifest: discovery.manifest, diagnostics: &diagnostics)
+        parsedFiles = parsed.parsedFiles
+        lastRawArtifacts = artifacts
+        lastScan = scan
+        return scan
+    }
+
+    private func discoverCandidates() throws -> ScanDiscovery {
         guard scanner.isAvailableDirectory(at: rootURL) else { throw FolderSourceError.unavailable(rootURL) }
-
-        var textFiles: [(URL, String, Int, Date?)] = []
-        var allFiles: [String: (URL, Date?)] = [:]
-        var diagnostics: [ContextDiagnostic] = []
-        var manifest: ContextManifest?
-        var manifestParsedBytes = 0
-
-        var regularFileCount = 0
-        var totalParsedBytes = 0
+        var state = DiscoveryState()
         try scanner.enumerate(at: rootURL) { entry in
-            try cancellationCheck()
-            let url = entry.url
-            let relative = relativePath(for: url)
-            let components = relative.split(separator: "/").map(String.init)
-            if entry.isSymbolicLink { return entry.isDirectory ? .skipDescendants : .continue }
-            if FolderSourcePathPolicy.shouldIgnore(components: components, isDirectory: entry.isDirectory) {
-                return entry.isDirectory ? .skipDescendants : .continue
-            }
-            guard entry.isRegularFile else { return .continue }
-            regularFileCount += 1
-            guard regularFileCount <= limits.maximumFileCount else { throw FolderSourceError.fileCountLimitExceeded(limit: limits.maximumFileCount) }
-            allFiles[normalized(relative)] = (url, entry.contentModificationDate)
-            if FolderSourcePathPolicy.isManifest(relative) {
-                guard entry.fileSize <= Self.maximumParsedBytes else {
-                    throw FolderSourceError.manifestBytesLimitExceeded(limit: Self.maximumParsedBytes)
-                }
-                let data: Data
-                do {
-                    data = try scanner.readData(at: url)
-                } catch {
-                    throw FolderSourceError.fileReadFailed(url, error)
-                }
-                // File providers can report zero or stale sizes. Bound the
-                // coordinated bytes before JSON decoding as well as metadata.
-                guard data.count <= Self.maximumParsedBytes else {
-                    throw FolderSourceError.manifestBytesLimitExceeded(limit: Self.maximumParsedBytes)
-                }
-                manifestParsedBytes = data.count
-                totalParsedBytes += data.count
-                guard totalParsedBytes <= limits.maximumTotalParsedBytes else {
-                    throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes)
-                }
-                let loaded = ManifestLoader().load(data)
-                manifest = loaded.0
-                diagnostics.append(contentsOf: loaded.1)
-                return .continue
-            }
-            if FolderSourcePathPolicy.isSupportedContentFile(relative) {
-                if entry.fileSize <= Self.maximumParsedBytes {
-                    totalParsedBytes += entry.fileSize
-                    guard totalParsedBytes <= limits.maximumTotalParsedBytes else { throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes) }
-                }
-                textFiles.append((url, relative, entry.fileSize, entry.contentModificationDate))
-            }
-            return .continue
+            try discover(entry, state: &state)
         }
         // An inaccessible or ejected root after a successful walk still means
         // the candidate graph was not built from a coherent source.
         guard scanner.isAvailableDirectory(at: rootURL) else { throw FolderSourceError.unavailable(rootURL) }
+        return state.discovery
+    }
 
-        var artifacts: [SourceArtifact] = []
-        var referencedPaths = Set<String>()
-        var actualParsedBytes = manifestParsedBytes
-        var nextParsedFiles: [String: CachedParse] = [:]
-        for (url, relative, size, modificationDate) in textFiles.sorted(by: { $0.1 < $1.1 }) {
+    private func discover(_ entry: FolderFileEntry, state: inout DiscoveryState) throws -> FolderTraversalDirective {
+        try cancellationCheck()
+        let relative = relativePath(for: entry.url)
+        let components = relative.split(separator: "/").map(String.init)
+        if entry.isSymbolicLink || FolderSourcePathPolicy.shouldIgnore(components: components, isDirectory: entry.isDirectory) {
+            return entry.isDirectory ? .skipDescendants : .continue
+        }
+        guard entry.isRegularFile else { return .continue }
+        state.regularFileCount += 1
+        guard state.regularFileCount <= limits.maximumFileCount else { throw FolderSourceError.fileCountLimitExceeded(limit: limits.maximumFileCount) }
+        state.discovery.allFiles[normalized(relative)] = (entry.url, entry.contentModificationDate)
+        if FolderSourcePathPolicy.isManifest(relative) {
+            try loadManifest(at: entry.url, advertisedBytes: entry.fileSize, state: &state)
+            return .continue
+        }
+        if FolderSourcePathPolicy.isSupportedContentFile(relative) { try appendCandidate(entry, relative: relative, state: &state) }
+        return .continue
+    }
+
+    private func loadManifest(at url: URL, advertisedBytes: Int, state: inout DiscoveryState) throws {
+        guard advertisedBytes <= Self.maximumParsedBytes else { throw FolderSourceError.manifestBytesLimitExceeded(limit: Self.maximumParsedBytes) }
+        let data: Data
+        do { data = try scanner.readData(at: url) }
+        catch { throw FolderSourceError.fileReadFailed(url, error) }
+        // File providers can report zero or stale sizes. Bound the coordinated
+        // bytes before JSON decoding as well as metadata.
+        guard data.count <= Self.maximumParsedBytes else { throw FolderSourceError.manifestBytesLimitExceeded(limit: Self.maximumParsedBytes) }
+        state.discovery.manifestParsedBytes = data.count
+        state.totalAdvertisedBytes += data.count
+        guard state.totalAdvertisedBytes <= limits.maximumTotalParsedBytes else { throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes) }
+        let loaded = ManifestLoader().load(data)
+        state.discovery.manifest = loaded.0
+        state.discovery.diagnostics.append(contentsOf: loaded.1)
+    }
+
+    private func appendCandidate(_ entry: FolderFileEntry, relative: String, state: inout DiscoveryState) throws {
+        if entry.fileSize <= Self.maximumParsedBytes {
+            state.totalAdvertisedBytes += entry.fileSize
+            guard state.totalAdvertisedBytes <= limits.maximumTotalParsedBytes else { throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes) }
+        }
+        state.discovery.textFiles.append(.init(url: entry.url, relativePath: relative, advertisedBytes: entry.fileSize, modificationDate: entry.contentModificationDate))
+    }
+
+    private func parseCandidates(_ discovery: ScanDiscovery) throws -> ParsedCandidates {
+        var result = ParsedCandidates(artifacts: [], referencedPaths: [], parsedFiles: [:], diagnostics: [])
+        var actualParsedBytes = discovery.manifestParsedBytes
+        for candidate in discovery.textFiles.sorted(by: { $0.relativePath < $1.relativePath }) {
             try cancellationCheck()
-            let modified = modificationDate ?? .distantPast
-            if size > Self.maximumParsedBytes {
-                diagnostics.append(.init(id: "oversized-\(StableHash.hex(relative))", severity: .warning, message: "Skipped deep parsing because this text file is larger than 2 MiB.", path: relative))
-                artifacts.append(makeArtifact(relative: relative, url: url, data: Data(), modified: modified, parsed: .init(title: url.deletingPathExtension().lastPathComponent, text: "", metadata: .init())))
+            if candidate.advertisedBytes > Self.maximumParsedBytes {
+                appendOversizedArtifact(candidate, result: &result)
                 continue
             }
             do {
-                let data: Data
-                do { data = try scanner.readData(at: url) }
-                catch { throw FolderSourceError.fileReadFailed(url, error) }
-                // File providers and editors can replace a file between
-                // enumeration and coordinated read. Never parse more than the
-                // advertised aggregate budget in that case.
-                guard data.count <= Self.maximumParsedBytes else {
-                    throw FolderSourceError.fileReadFailed(url, FolderSourceError.totalParsedBytesLimitExceeded(limit: Self.maximumParsedBytes))
-                }
-                actualParsedBytes += data.count
-                guard actualParsedBytes <= limits.maximumTotalParsedBytes else {
-                    throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes)
-                }
-                // Compare bytes, not just mtime/size: a checkbox can change without either
-                // metadata field changing. Cache only parsing; traversal and read failures
-                // must still reject the scan rather than silently serving stale content.
-                let parsed: ParsedDocument
-                if let cached = parsedFiles[relative], cached.data == data, cached.modified == modified {
-                    parsed = cached.document
-                } else {
-                    parsed = try parser.parse(.init(url: url, relativePath: relative, data: data, modifiedAt: modified))
-                }
-                // The scanner may return mapped bytes. Own a copy so an external
-                // in-place write cannot silently change the cache's comparison value.
-                nextParsedFiles[relative] = .init(data: data.withUnsafeBytes { Data($0) }, modified: modified, document: parsed)
-                diagnostics.append(contentsOf: parsed.diagnostics)
-                let artifact = makeArtifact(relative: relative, url: url, data: data, modified: modified, parsed: parsed)
-                artifacts.append(artifact)
-                for link in parsed.metadata.links {
-                    let directory = NSString(string: relative).deletingLastPathComponent
-                    let joined = directory.isEmpty || directory == "." ? link.target : directory + "/" + link.target
-                    let referenced = normalized(joined.components(separatedBy: "#")[0])
-                    if !URL(fileURLWithPath: referenced).pathExtension.isEmpty { referencedPaths.insert(referenced) }
-                }
+                try parse(candidate, actualParsedBytes: &actualParsedBytes, result: &result)
             } catch let error as FolderSourceError {
                 throw error
             } catch {
-                diagnostics.append(.init(id: "parse-\(StableHash.hex(relative))", severity: .warning, message: "Could not parse file: \(error.localizedDescription)", path: relative))
+                result.diagnostics.append(.init(id: "parse-\(StableHash.hex(candidate.relativePath))", severity: .warning, message: "Could not parse file: \(error.localizedDescription)", path: candidate.relativePath))
             }
         }
+        return result
+    }
 
+    private func appendOversizedArtifact(_ candidate: ScanCandidate, result: inout ParsedCandidates) {
+        let modified = candidate.modificationDate ?? .distantPast
+        result.diagnostics.append(.init(id: "oversized-\(StableHash.hex(candidate.relativePath))", severity: .warning, message: "Skipped deep parsing because this text file is larger than 2 MiB.", path: candidate.relativePath))
+        result.artifacts.append(makeArtifact(relative: candidate.relativePath, url: candidate.url, data: Data(), modified: modified, parsed: .init(title: candidate.url.deletingPathExtension().lastPathComponent, text: "", metadata: .init())))
+    }
+
+    private func parse(_ candidate: ScanCandidate, actualParsedBytes: inout Int, result: inout ParsedCandidates) throws {
+        let data: Data
+        do { data = try scanner.readData(at: candidate.url) }
+        catch { throw FolderSourceError.fileReadFailed(candidate.url, error) }
+        // File providers and editors can replace a file between enumeration and
+        // coordinated read. Never parse more than the advertised aggregate budget.
+        guard data.count <= Self.maximumParsedBytes else { throw FolderSourceError.fileReadFailed(candidate.url, FolderSourceError.totalParsedBytesLimitExceeded(limit: Self.maximumParsedBytes)) }
+        actualParsedBytes += data.count
+        guard actualParsedBytes <= limits.maximumTotalParsedBytes else { throw FolderSourceError.totalParsedBytesLimitExceeded(limit: limits.maximumTotalParsedBytes) }
+        let modified = candidate.modificationDate ?? .distantPast
+        let parsed = try cachedOrParsed(candidate, data: data, modified: modified)
+        // The scanner may return mapped bytes. Own a copy so an in-place write
+        // cannot silently change the cache's comparison value.
+        result.parsedFiles[candidate.relativePath] = .init(data: data.withUnsafeBytes { Data($0) }, modified: modified, document: parsed)
+        result.diagnostics.append(contentsOf: parsed.diagnostics)
+        result.artifacts.append(makeArtifact(relative: candidate.relativePath, url: candidate.url, data: data, modified: modified, parsed: parsed))
+        result.referencedPaths.formUnion(referencedPaths(from: candidate.relativePath, parsed: parsed))
+    }
+
+    private func cachedOrParsed(_ candidate: ScanCandidate, data: Data, modified: Date) throws -> ParsedDocument {
+        // Compare bytes, not just mtime/size: a checkbox can change without either.
+        if let cached = parsedFiles[candidate.relativePath], cached.data == data, cached.modified == modified { return cached.document }
+        return try parser.parse(.init(url: candidate.url, relativePath: candidate.relativePath, data: data, modifiedAt: modified))
+    }
+
+    private func referencedPaths(from relative: String, parsed: ParsedDocument) -> Set<String> {
+        let directory = NSString(string: relative).deletingLastPathComponent
+        return Set(parsed.metadata.links.compactMap { link in
+            let joined = directory.isEmpty || directory == "." ? link.target : directory + "/" + link.target
+            let referenced = normalized(joined.components(separatedBy: "#")[0])
+            return URL(fileURLWithPath: referenced).pathExtension.isEmpty ? nil : referenced
+        })
+    }
+
+    private func appendReferencedArtifacts(to artifacts: inout [SourceArtifact], referencedPaths: Set<String>, allFiles: [String: (URL, Date?)]) {
         let existing = Set(artifacts.map { normalized($0.relativePath) })
         for path in referencedPaths.subtracting(existing).sorted() {
             guard let (url, modificationDate) = allFiles[path] else { continue }
             artifacts.append(makeArtifact(relative: relativePath(for: url), url: url, data: Data(), modified: modificationDate ?? .distantPast, parsed: .init(title: url.lastPathComponent, text: "", metadata: .init())))
         }
+    }
+
+    private func repairDuplicateArtifactIDs(in artifacts: inout [SourceArtifact], diagnostics: inout [ContextDiagnostic]) {
         var seenIDs = Set<String>()
         for index in artifacts.indices {
             guard !seenIDs.insert(artifacts[index].id).inserted else { continue }
@@ -355,19 +397,15 @@ public final class FolderContextSource: ContextSource, @unchecked Sendable {
             artifacts[index].metadata.explicitID = nil
             _ = seenIDs.insert(artifacts[index].id)
         }
-        let normalizedArtifacts = normalizer.normalize(artifacts)
-        parsedFiles = nextParsedFiles
-        lastRawArtifacts = artifacts
+    }
+
+    private func makeScan(artifacts: [SourceArtifact], manifest: ContextManifest?, diagnostics: inout [ContextDiagnostic]) -> SourceScan {
         if let manifest {
-            let adapted = folderDeclarations(from: manifest, artifacts: normalizedArtifacts)
+            let adapted = folderDeclarations(from: manifest, artifacts: artifacts)
             diagnostics.append(contentsOf: adapted.diagnostics)
-            let scan = SourceScan(sourceID: sourceID, artifacts: normalizedArtifacts, declarations: adapted.declarations, diagnostics: diagnostics, indexedAt: Date())
-            lastScan = scan
-            return scan
+            return SourceScan(sourceID: sourceID, artifacts: artifacts, declarations: adapted.declarations, diagnostics: diagnostics, indexedAt: Date())
         }
-        let scan = SourceScan(sourceID: sourceID, artifacts: normalizedArtifacts, declarations: nil, diagnostics: diagnostics, indexedAt: Date())
-        lastScan = scan
-        return scan
+        return SourceScan(sourceID: sourceID, artifacts: artifacts, declarations: nil, diagnostics: diagnostics, indexedAt: Date())
     }
 
     private func makeArtifact(relative: String, url: URL, data: Data, modified: Date, parsed: ParsedDocument) -> SourceArtifact {

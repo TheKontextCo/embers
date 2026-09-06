@@ -27,6 +27,8 @@ For the full verification loop:
 
 ```bash
 swift test
+./scripts/verify-complexity.sh
+./scripts/test-complexity-gate.sh
 ./scripts/verify-repository-readiness.sh
 ./scripts/test-release-scripts.sh
 git diff --check
@@ -34,7 +36,8 @@ git diff --check
 open build/embers.app
 ```
 
-The first four commands are the offline CI-equivalent checks. The bundle and
+Install SwiftLint 0.65.1 as described in [the complexity guide](docs/COMPLEXITY.md).
+The checks before bundling are the offline CI-equivalent checks. The bundle and
 launch commands provide the signed-app proof required for UI, permissions, and
 speech changes. A Developer ID certificate is not required for development;
 the bundle script uses an Apple Development identity when available and falls

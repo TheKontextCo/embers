@@ -40,6 +40,42 @@ final class GraphMentionCacheTests: XCTestCase {
         try verify()
     }
 
+    func testExactMentionOwnerUsesRankAndIsIndependentOfArtifactInputOrder() throws {
+        let older = artifact("owner-old", title: "Apollo", text: "", date: 10)
+        let newer = artifact("owner-new", title: "Apollo", text: "", date: 20)
+        let speaker = artifact("speaker", title: "Speaker", text: "Apollo", date: 30)
+        let builder = DeterministicGraphBuilder()
+        let first = try builder.build(from: .init(sourceID: "fixture", artifacts: [older, newer, speaker], declarations: nil, diagnostics: [], indexedAt: .distantPast))
+        let second = try builder.build(from: .init(sourceID: "fixture", artifacts: [speaker, older, newer], declarations: nil, diagnostics: [], indexedAt: .distantPast))
+
+        XCTAssertEqual(first.revision, second.revision)
+        XCTAssertEqual(first.anchors, second.anchors)
+        XCTAssertEqual(first.relations, second.relations)
+        XCTAssertTrue(first.relations.contains { $0.source == "artifact:speaker" && $0.target == "owner-new" && $0.kind == "mentions" })
+        XCTAssertFalse(first.relations.contains { $0.source == "artifact:speaker" && $0.target == "owner-old" && $0.kind == "mentions" })
+    }
+
+    func testExactMentionCanonicalNameWinsBeforeARecentAlias() throws {
+        let canonical = artifact("canonical", title: "Apollo", text: "", date: 10)
+        var alias = artifact("alias", title: "Mission", text: "", date: 30)
+        alias.metadata.aliases = ["Apollo"]
+        let speaker = artifact("speaker", title: "Speaker", text: "Apollo", date: 20)
+        let snapshot = try DeterministicGraphBuilder().build(from: .init(sourceID: "fixture", artifacts: [canonical, alias, speaker], declarations: nil, diagnostics: [], indexedAt: .distantPast))
+
+        XCTAssertTrue(snapshot.relations.contains { $0.source == "artifact:speaker" && $0.target == "canonical" && $0.kind == "mentions" })
+        XCTAssertFalse(snapshot.relations.contains { $0.source == "artifact:speaker" && $0.target == "alias" && $0.kind == "mentions" })
+    }
+
+    func testExactMentionsRespectLexicalBoundariesForOverlappingPhrases() throws {
+        let alpha = artifact("alpha", title: "Alpha", text: "", date: 10)
+        let alphanumeric = artifact("alphanumeric", title: "Alphanumeric", text: "", date: 20)
+        let speaker = artifact("speaker", title: "Speaker", text: "Alphanumeric Alpha alphabet", date: 30)
+        let snapshot = try DeterministicGraphBuilder().build(from: .init(sourceID: "fixture", artifacts: [alpha, alphanumeric, speaker], declarations: nil, diagnostics: [], indexedAt: .distantPast))
+
+        XCTAssertEqual(snapshot.relations.first { $0.source == "artifact:speaker" && $0.target == "alpha" && $0.kind == "mentions" }?.provenance.detail, "count:1")
+        XCTAssertEqual(snapshot.relations.first { $0.source == "artifact:speaker" && $0.target == "alphanumeric" && $0.kind == "mentions" }?.provenance.detail, "count:1")
+    }
+
     private func artifact(_ id: String, title: String, text: String, date: TimeInterval) -> SourceArtifact {
         .init(id: id, relativePath: "Notes/\(id).md", mediaKind: .markdown, title: title,
               extractedText: text, modifiedAt: Date(timeIntervalSince1970: date), contentHash: id,
