@@ -261,6 +261,14 @@ expires. A persistence failure is shown as a failure and must never claim the ro
 Snapshot publication is generation-guarded so a stale reload cannot reactivate a route after its
 exclusion was saved.
 
+The feedback archive is loaded before any mutation becomes authoritative. A corrupt, unsupported,
+or unreadable archive remains a visible load failure: it is never interpreted as empty learning and
+can be retried. Retiring a source is the one explicit recovery operation for that condition. Because
+the archive is shared, the app cannot selectively preserve unknown records; it deletes the unreadable
+archive only after the durable delete succeeds. A failed recovery leaves the archive intact and
+retryable. Cancellation before a learning, Undo, or reset mutation is neutral and leaves durable
+feedback untouched.
+
 The compiled pack answers: **what is allowed?**
 
 The preference overlay answers: **among allowed choices, what has this user chosen before?**

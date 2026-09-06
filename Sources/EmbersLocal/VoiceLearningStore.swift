@@ -104,6 +104,7 @@ public actor VoiceLearningStore {
 
     public func snapshot(sourceIDs: Set<String>) throws -> VoiceLearningSnapshot {
         try loadIfNeeded()
+        try Task.checkCancellation()
         let records = archive.exclusions.filter { sourceIDs.contains($0.key.sourceID) }
         return VoiceLearningSnapshot(
             sourceIDs: sourceIDs,
@@ -123,6 +124,7 @@ public actor VoiceLearningStore {
             throw CancellationError()
         }
         try loadIfNeeded()
+        try Task.checkCancellation()
         if archive.exclusions.contains(where: { $0.key == key }) {
             return try snapshot(sourceIDs: Set(archive.exclusions.map { $0.key.sourceID }))
         }
@@ -153,6 +155,7 @@ public actor VoiceLearningStore {
             throw CancellationError()
         }
         try loadIfNeeded()
+        try Task.checkCancellation()
         let previous = archive
         archive.exclusions.removeAll { $0.key == key }
         guard archive != previous else {
@@ -168,11 +171,21 @@ public actor VoiceLearningStore {
     }
 
     public func delete(sourceID: String, sourceGeneration: UInt64) throws {
+        try Task.checkCancellation()
         minimumSourceGeneration[sourceID] = max(
             sourceGeneration,
             minimumSourceGeneration[sourceID, default: 0]
         )
-        try loadIfNeeded()
+        do {
+            try loadIfNeeded()
+        } catch {
+            // The archive belongs to every source, so an unreadable archive cannot
+            // be filtered safely. Source retirement is the explicit recovery path:
+            // erase the unreadable file only after its deletion succeeds.
+            try recoverUnreadableArchive()
+            return
+        }
+        try Task.checkCancellation()
         let previous = archive
         archive.exclusions.removeAll { $0.key.sourceID == sourceID }
         guard archive != previous else { return }
@@ -186,8 +199,10 @@ public actor VoiceLearningStore {
 
     private func loadIfNeeded() throws {
         guard !hasLoaded else { return }
-        defer { hasLoaded = true }
-        guard let data = try persistence.load() else { return }
+        guard let data = try persistence.load() else {
+            hasLoaded = true
+            return
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(Archive.self, from: data)
@@ -196,6 +211,16 @@ public actor VoiceLearningStore {
             throw VoiceLearningStoreError.unsupportedArchive
         }
         archive = decoded
+        hasLoaded = true
+    }
+
+    /// Called only while retiring a source after loading the shared archive
+    /// failed. We must not make an empty in-memory archive authoritative until
+    /// the unreadable durable archive has actually been deleted.
+    private func recoverUnreadableArchive() throws {
+        try persistence.delete()
+        archive = Archive()
+        hasLoaded = true
     }
 
     private func persist() throws {

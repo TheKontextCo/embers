@@ -86,6 +86,162 @@ final class VoiceLearningStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.exclusions.isEmpty)
     }
 
+    func testLoadFailureDoesNotAuthorizeAnEmptyArchiveAndCanBeRetried() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        persistence.failNextLoad = true
+        let store = VoiceLearningStore(persistence: persistence)
+        let exclusion = key(sourceID: "folder:a", nodeID: "apollo", terms: ["apollo"])
+
+        do {
+            _ = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTFail("Expected the injected load failure.")
+        } catch MemoryVoiceLearningPersistence.Failure.load {
+            // Expected. The store must remain unloaded.
+        }
+
+        try await store.recordExclusion(exclusion, at: rejectedAt, sourceGeneration: 0)
+        let snapshot = try await store.snapshot(sourceIDs: ["folder:a"])
+        XCTAssertNotNil(snapshot.exclusions[exclusion])
+    }
+
+    func testCorruptArchiveRemainsVisibleUntilSourceRetirementErasesIt() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        persistence.replaceData(Data("not json".utf8))
+        let store = VoiceLearningStore(persistence: persistence)
+
+        for _ in 0 ..< 2 {
+            do {
+                _ = try await store.snapshot(sourceIDs: ["folder:a"])
+                XCTFail("A corrupt archive must not be treated as empty state.")
+            } catch {
+                XCTAssertNotNil(persistence.data)
+            }
+        }
+
+        try await store.delete(sourceID: "folder:a", sourceGeneration: 1)
+        XCTAssertNil(persistence.data)
+        let reopened = VoiceLearningStore(persistence: persistence)
+        let snapshot = try await reopened.snapshot(sourceIDs: ["folder:a"])
+        XCTAssertTrue(snapshot.exclusions.isEmpty)
+    }
+
+    func testUnsupportedArchiveRemainsVisibleUntilSourceRetirementErasesIt() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        persistence.replaceData(Data(#"{"schemaVersion":999,"exclusions":[]}"#.utf8))
+        let store = VoiceLearningStore(persistence: persistence)
+
+        do {
+            _ = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTFail("Expected an unsupported archive error.")
+        } catch VoiceLearningStoreError.unsupportedArchive {
+            XCTAssertNotNil(persistence.data)
+        }
+
+        try await store.delete(sourceID: "folder:a", sourceGeneration: 1)
+        XCTAssertNil(persistence.data)
+    }
+
+    func testFailedUnreadableArchiveDeletionRemainsRetryable() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        persistence.replaceData(Data("not json".utf8))
+        persistence.failNextDelete = true
+        let store = VoiceLearningStore(persistence: persistence)
+
+        do {
+            try await store.delete(sourceID: "folder:a", sourceGeneration: 1)
+            XCTFail("Expected the injected deletion failure.")
+        } catch MemoryVoiceLearningPersistence.Failure.delete {
+            XCTAssertNotNil(persistence.data)
+        }
+
+        try await store.delete(sourceID: "folder:a", sourceGeneration: 2)
+        XCTAssertNil(persistence.data)
+    }
+
+    func testFailedUndoCanBeRetriedWithoutLosingThePersistedExclusion() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        let store = VoiceLearningStore(persistence: persistence)
+        let exclusion = key(sourceID: "folder:a", nodeID: "apollo", terms: ["apollo"])
+        try await store.recordExclusion(exclusion, at: rejectedAt, sourceGeneration: 0)
+        persistence.failNextSave = true
+
+        do {
+            _ = try await store.removeExclusion(exclusion, sourceGeneration: 0)
+            XCTFail("Expected the injected save failure.")
+        } catch MemoryVoiceLearningPersistence.Failure.save {
+            let snapshot = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTAssertNotNil(snapshot.exclusions[exclusion])
+        }
+
+        try await store.removeExclusion(exclusion, sourceGeneration: 0)
+        let reopened = VoiceLearningStore(persistence: persistence)
+        let snapshot = try await reopened.snapshot(sourceIDs: ["folder:a"])
+        XCTAssertNil(snapshot.exclusions[exclusion])
+    }
+
+    func testFailedResetCanBeRetriedAndIsDurableAfterReopening() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        let store = VoiceLearningStore(persistence: persistence)
+        let sourceA = key(sourceID: "folder:a", nodeID: "apollo", terms: ["apollo"])
+        let sourceB = key(sourceID: "folder:b", nodeID: "journal", terms: ["journal"])
+        try await store.recordExclusion(sourceA, at: rejectedAt, sourceGeneration: 0)
+        try await store.recordExclusion(sourceB, at: rejectedAt, sourceGeneration: 0)
+        persistence.failNextSave = true
+
+        do {
+            try await store.delete(sourceID: "folder:a", sourceGeneration: 1)
+            XCTFail("Expected the injected save failure.")
+        } catch MemoryVoiceLearningPersistence.Failure.save {
+            let snapshot = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTAssertNotNil(snapshot.exclusions[sourceA])
+        }
+
+        try await store.delete(sourceID: "folder:a", sourceGeneration: 2)
+        let reopened = VoiceLearningStore(persistence: persistence)
+        let snapshot = try await reopened.snapshot(sourceIDs: ["folder:a", "folder:b"])
+        XCTAssertNil(snapshot.exclusions[sourceA])
+        XCTAssertNotNil(snapshot.exclusions[sourceB])
+    }
+
+    func testCancelledMutationsDoNotPersistOrEraseLearning() async throws {
+        let persistence = MemoryVoiceLearningPersistence()
+        let store = VoiceLearningStore(persistence: persistence)
+        let exclusion = key(sourceID: "folder:a", nodeID: "apollo", terms: ["apollo"])
+        let date = rejectedAt
+        let recordGate = CancellationGate()
+        let recordTask = Task { () throws -> VoiceLearningSnapshot in
+            await recordGate.wait()
+            return try await store.recordExclusion(exclusion, at: date, sourceGeneration: 0)
+        }
+        recordTask.cancel()
+        await recordGate.open()
+
+        do {
+            _ = try await recordTask.value
+            XCTFail("Expected cancellation before recording.")
+        } catch is CancellationError {
+            let snapshot = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTAssertTrue(snapshot.exclusions.isEmpty)
+        }
+
+        try await store.recordExclusion(exclusion, at: rejectedAt, sourceGeneration: 0)
+        let deletionGate = CancellationGate()
+        let deletionTask = Task { () throws -> Void in
+            await deletionGate.wait()
+            try await store.delete(sourceID: "folder:a", sourceGeneration: 1)
+        }
+        deletionTask.cancel()
+        await deletionGate.open()
+
+        do {
+            try await deletionTask.value
+            XCTFail("Expected cancellation before reset.")
+        } catch is CancellationError {
+            let snapshot = try await store.snapshot(sourceIDs: ["folder:a"])
+            XCTAssertNotNil(snapshot.exclusions[exclusion])
+        }
+    }
+
     private func key(
         sourceID: String,
         nodeID: String,
@@ -102,16 +258,26 @@ final class VoiceLearningStoreTests: XCTestCase {
 }
 
 private final class MemoryVoiceLearningPersistence: VoiceLearningPersistence, @unchecked Sendable {
-    enum Failure: Error { case save }
+    enum Failure: Error { case load, save, delete }
 
     private let lock = NSLock()
     private var storedData: Data?
+    var failNextLoad = false
     var failNextSave = false
+    var failNextDelete = false
 
     var data: Data? { lock.withLock { storedData } }
 
+    func replaceData(_ data: Data?) { lock.withLock { storedData = data } }
+
     func load() throws -> Data? {
-        lock.withLock { storedData }
+        try lock.withLock {
+            if failNextLoad {
+                failNextLoad = false
+                throw Failure.load
+            }
+            return storedData
+        }
     }
 
     func save(_ data: Data) throws {
@@ -125,7 +291,35 @@ private final class MemoryVoiceLearningPersistence: VoiceLearningPersistence, @u
     }
 
     func delete() throws {
-        lock.withLock { storedData = nil }
+        try lock.withLock {
+            if failNextDelete {
+                failNextDelete = false
+                throw Failure.delete
+            }
+            storedData = nil
+        }
+    }
+}
+
+private actor CancellationGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            if isOpen {
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
