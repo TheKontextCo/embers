@@ -554,6 +554,14 @@ struct VoiceRoutingRuntimeRouter {
         var match: VoiceRoutingSharedConceptMatch
     }
 
+    /// Node IDs are globally unique in the composed graph. Source identity is
+    /// retained in storage for scoped deletion, then omitted from this hot-path
+    /// lookup so every transcript check remains constant-time.
+    private struct ExcludedRouteIdentity: Hashable {
+        var nodeID: String
+        var normalizedTerms: [String]
+    }
+
     struct Evaluation {
         var matches: [VoiceRoutingRuntimeMatch]
         var sharedConcepts: [VoiceRoutingSharedConceptMatch]
@@ -566,11 +574,13 @@ struct VoiceRoutingRuntimeRouter {
     private let sharedConcepts: [VoiceRoutingSharedConcept]
     private let targetsByNodeID: [String: MatchTarget]
     private let preferenceBoosts: [VoiceRoutingPreferenceKey: Double]
+    private let excludedRoutes: Set<ExcludedRouteIdentity>
 
     init(
         baseTargets: [MatchTarget],
         pack: VoiceRoutingPack?,
-        preferenceBoosts: [VoiceRoutingPreferenceKey: Double] = [:]
+        preferenceBoosts: [VoiceRoutingPreferenceKey: Double] = [:],
+        excludedRouteKeys: Set<VoiceRouteExclusionKey> = []
     ) {
         let baseline = VoiceRoutingBaseline(targets: baseTargets)
         var rules = baseline.rules.map { Rule(target: $0.target, trigger: $0.trigger) }
@@ -607,6 +617,9 @@ struct VoiceRoutingRuntimeRouter {
         self.rules = rules
         targetsByNodeID = targetByNodeID
         self.preferenceBoosts = preferenceBoosts
+        excludedRoutes = Set(excludedRouteKeys.map {
+            ExcludedRouteIdentity(nodeID: $0.nodeID, normalizedTerms: $0.pattern.normalizedTerms)
+        })
     }
 
     var vocabulary: [String] {
@@ -718,7 +731,14 @@ struct VoiceRoutingRuntimeRouter {
 
         var rawCandidates: [Candidate] = []
         for rule in rules {
-            guard case .node = rule.target.ref else { continue }
+            guard case .node(let nodeID) = rule.target.ref else { continue }
+            let patternIdentity = rule.trigger.pattern.routePatternIdentity
+            guard !excludedRoutes.contains(.init(
+                nodeID: nodeID,
+                normalizedTerms: patternIdentity.normalizedTerms
+            )) else {
+                continue
+            }
             let score = min(max(rule.trigger.score, 0), 1)
             rawCandidates.append(contentsOf: matchSpans(for: rule.trigger.pattern, in: words).map {
                 Candidate(rule: rule, span: $0, score: score)
@@ -812,7 +832,12 @@ struct VoiceRoutingRuntimeRouter {
                 base: MatchTarget,
                 boost: Double
             )? in
-                guard edge.origin.isDeterministicIdentity || !blockedNodeIDs.contains(edge.nodeID),
+                let patternIdentity = concept.pattern.routePatternIdentity
+                guard !excludedRoutes.contains(.init(
+                    nodeID: edge.nodeID,
+                    normalizedTerms: patternIdentity.normalizedTerms
+                )),
+                      edge.origin.isDeterministicIdentity || !blockedNodeIDs.contains(edge.nodeID),
                       edge.compiledStrength >= VoiceRoutingScorer.minimumScore,
                       let base = targetsByNodeID[edge.nodeID] else { return nil }
                 let rawBoost = preferenceBoosts[
@@ -1028,6 +1053,7 @@ struct VoiceRoutingStreamRouter {
     private var baseTargets: [MatchTarget]
     private var pack: VoiceRoutingPack?
     private var preferenceBoosts: [VoiceRoutingPreferenceKey: Double]
+    private var learning: VoiceLearningSnapshot
     private var suppression = VoiceMatchSuppression()
     private var lastUtteranceID: UUID?
     private var presentedNodeIDs = Set<String>()
@@ -1040,15 +1066,18 @@ struct VoiceRoutingStreamRouter {
     init(
         baseTargets: [MatchTarget],
         pack: VoiceRoutingPack?,
-        preferences: VoiceRoutingPreferenceSnapshot = .empty
+        preferences: VoiceRoutingPreferenceSnapshot = .empty,
+        learning: VoiceLearningSnapshot = .empty
     ) {
         self.baseTargets = baseTargets
         self.pack = pack
         preferenceBoosts = preferences.boosts
+        self.learning = learning
         runtime = .init(
             baseTargets: baseTargets,
             pack: pack,
-            preferenceBoosts: preferences.boosts
+            preferenceBoosts: preferences.boosts,
+            excludedRouteKeys: Set(learning.exclusions.keys)
         )
     }
 
@@ -1061,7 +1090,8 @@ struct VoiceRoutingStreamRouter {
         runtime = .init(
             baseTargets: baseTargets,
             pack: pack,
-            preferenceBoosts: preferenceBoosts
+            preferenceBoosts: preferenceBoosts,
+            excludedRouteKeys: Set(learning.exclusions.keys)
         )
         suppression.reset()
         lastUtteranceID = nil
@@ -1078,7 +1108,25 @@ struct VoiceRoutingStreamRouter {
 
     mutating func replacePreferences(_ boosts: [VoiceRoutingPreferenceKey: Double]) {
         preferenceBoosts = boosts
-        runtime = .init(baseTargets: baseTargets, pack: pack, preferenceBoosts: boosts)
+        runtime = .init(
+            baseTargets: baseTargets,
+            pack: pack,
+            preferenceBoosts: boosts,
+            excludedRouteKeys: Set(learning.exclusions.keys)
+        )
+    }
+
+    /// Explicit user exclusions are safe to install immediately: they remove
+    /// one route and cannot manufacture a new match. Preserve streaming
+    /// suppression and presentation history for the current utterance.
+    mutating func replaceLearning(_ learning: VoiceLearningSnapshot) {
+        self.learning = learning
+        runtime = .init(
+            baseTargets: baseTargets,
+            pack: pack,
+            preferenceBoosts: preferenceBoosts,
+            excludedRouteKeys: Set(learning.exclusions.keys)
+        )
     }
 
     mutating func process(

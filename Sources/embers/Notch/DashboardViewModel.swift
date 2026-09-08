@@ -18,9 +18,12 @@ final class DashboardViewModel: ObservableObject {
     let voiceRoutingPreferences: VoiceRoutingPreferenceState
     private let navigation: DashboardNavigationCoordinator
     private let taskMutations: DashboardTaskMutationCoordinator
+    private let willNavigateManually: () -> Void
     private let chooseDirectoryAction: (PluginIdentifier) -> Void
     private let canOpenContextLensAction: (PluginSourceIdentifier) -> Bool
     private let openContextLensAction: (PluginSourceIdentifier) -> Void
+    private let canResetVoiceFeedbackAction: (PluginSourceIdentifier) -> Bool
+    private let resetVoiceFeedbackAction: (PluginSourceIdentifier) -> Void
     private var collaboratorChanges = Set<AnyCancellable>()
 
     init(
@@ -30,9 +33,12 @@ final class DashboardViewModel: ObservableObject {
         voiceRoutingPreferences: VoiceRoutingPreferenceState,
         navigation: DashboardNavigationCoordinator,
         taskMutations: DashboardTaskMutationCoordinator,
+        willNavigateManually: @escaping () -> Void = {},
         chooseDirectory: @escaping (PluginIdentifier) -> Void,
         canOpenContextLens: @escaping (PluginSourceIdentifier) -> Bool = { _ in false },
-        openContextLens: @escaping (PluginSourceIdentifier) -> Void = { _ in }
+        openContextLens: @escaping (PluginSourceIdentifier) -> Void = { _ in },
+        canResetVoiceFeedback: @escaping (PluginSourceIdentifier) -> Bool = { _ in false },
+        resetVoiceFeedback: @escaping (PluginSourceIdentifier) -> Void = { _ in }
     ) {
         self.context = context
         self.speech = speech
@@ -40,9 +46,12 @@ final class DashboardViewModel: ObservableObject {
         self.voiceRoutingPreferences = voiceRoutingPreferences
         self.navigation = navigation
         self.taskMutations = taskMutations
+        self.willNavigateManually = willNavigateManually
         self.chooseDirectoryAction = chooseDirectory
         self.canOpenContextLensAction = canOpenContextLens
         self.openContextLensAction = openContextLens
+        self.canResetVoiceFeedbackAction = canResetVoiceFeedback
+        self.resetVoiceFeedbackAction = resetVoiceFeedback
 
         navigation.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
@@ -66,12 +75,13 @@ final class DashboardViewModel: ObservableObject {
     var recent: [RecentArtifact] { context.recent }
 
     func toggleSettings() {
+        willNavigateManually()
         withAnimation(NotchViewModel.hoverSpring) { showingSettings.toggle() }
     }
 
     func dismissSettings() { showingSettings = false }
 
-    func openList() async { await navigation.openList() }
+    func openList() async { willNavigateManually(); await navigation.openList() }
     func retainNavigationForReturn() { navigation.retainNavigationForReturn() }
     func resumeRetainedNavigation() -> Bool { navigation.resumeRetainedNavigation() }
     func discardRetainedNavigation() { navigation.discardRetainedNavigation() }
@@ -81,12 +91,13 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func select(_ id: String, emphasizedReveal: Bool = false) async {
+        willNavigateManually()
         await navigation.select(id, emphasizedReveal: emphasizedReveal)
     }
 
-    func back() { navigation.back() }
-    func showContext() { navigation.showContext() }
-    func showRecent() { navigation.showRecent() }
+    func back() { willNavigateManually(); navigation.back() }
+    func showContext() { willNavigateManually(); navigation.showContext() }
+    func showRecent() { willNavigateManually(); navigation.showRecent() }
     func reload() async { await navigation.reload() }
 
     func ignoreSelected() { if let selected { context.ignore(selected); back() } }
@@ -104,10 +115,17 @@ final class DashboardViewModel: ObservableObject {
     func openContextLens(_ sourceID: PluginSourceIdentifier) {
         openContextLensAction(sourceID)
     }
+    func canResetVoiceFeedback(_ sourceID: PluginSourceIdentifier) -> Bool {
+        canResetVoiceFeedbackAction(sourceID)
+    }
+    func resetVoiceFeedback(_ sourceID: PluginSourceIdentifier) {
+        resetVoiceFeedbackAction(sourceID)
+    }
     func toggleListening() { if speech.isListening { speech.stop() } else { Task { await speech.startFromUserAction() } } }
     func resetVoiceRoutingPreferences() { voiceRoutingPreferences.beginReset() }
 
     func open(_ artifact: SourceArtifact) {
+        willNavigateManually()
         Task { await context.open(artifact) }
     }
 

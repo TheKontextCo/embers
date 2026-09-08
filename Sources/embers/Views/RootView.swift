@@ -10,6 +10,7 @@ struct RootView: View {
     let app: AppState
     @ObservedObject var notch: NotchViewModel
     @ObservedObject var peeks: PeekQueue
+    @ObservedObject var voiceLearning: VoiceLearningCoordinator
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     let speech: SpeechListener
     private let dash: DashboardViewModel
@@ -18,6 +19,7 @@ struct RootView: View {
         self.app = app
         self._notch = ObservedObject(wrappedValue: app.notch)
         self._peeks = ObservedObject(wrappedValue: app.peeks)
+        self._voiceLearning = ObservedObject(wrappedValue: app.voiceLearning)
         self.speech = app.speech
         self.dash = app.dash
     }
@@ -94,7 +96,7 @@ struct RootView: View {
                     Color.clear.frame(height: notchHeight)
                     if hasDisplayedPeeks {
                         PeekRow(peeks: peeks, notchIsOpen: isOpen) { peek in
-                            app.openMatch(peek.target, closeWhenPointerLeaves: true)
+                            app.openPeek(peek, closeWhenPointerLeaves: true)
                         }
                         // RootView's transparent host window is wider than the visible notch.
                         // Give PeekRow the slab's explicit width so its equal-cell geometry is
@@ -133,11 +135,32 @@ struct RootView: View {
             }
             .animation(isOpen ? NotchViewModel.openSpring : NotchViewModel.closeSpring, value: notch.state)
             .animation(NotchViewModel.peekLayout, value: peeks.peeks.map(\.id))
+
+            if let notice = voiceLearning.notice {
+                HStack(spacing: 8) {
+                    Text(notice.message)
+                    if notice.canUndo {
+                        Button("Undo") { app.undoVoiceRejection() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Style.emberSolid)
+                    }
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(.black.opacity(0.94), in: Capsule())
+                .overlay(Capsule().strokeBorder(Style.hairline))
+                .offset(y: containerHeight + 7)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .id(notice.id)
+            }
         }
         .frame(width: NotchMetrics.windowSize.width,
                height: NotchMetrics.windowSize.height, alignment: .top)
         .sensoryFeedback(.alignment, trigger: notch.state)
         .sensoryFeedback(.levelChange, trigger: peeks.peeks.count)
+        .animation(NotchViewModel.dashboardReveal, value: voiceLearning.notice?.id)
         .preferredColorScheme(.dark)
     }
 

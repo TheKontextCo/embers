@@ -457,6 +457,99 @@ final class VoiceRoutingTests: XCTestCase {
         XCTAssertTrue(router.matches(in: "second brain").isEmpty)
     }
 
+    func testExactRouteExclusionBlocksOnlyOnePatternForOneNode() {
+        let base = [
+            MatchTarget(phrase: "Apollo", ref: .node("mission"), title: "Mission"),
+            MatchTarget(phrase: "Moon Mission", ref: .node("mission"), title: "Mission"),
+            MatchTarget(phrase: "Journal", ref: .node("journal"), title: "Journal"),
+        ]
+        let exclusion = VoiceRouteExclusionKey(
+            sourceID: "folder:a",
+            nodeID: "mission",
+            pattern: .init(kind: .phrase, normalizedTerms: ["apollo"])
+        )
+        let router = VoiceRoutingRuntimeRouter(
+            baseTargets: base,
+            pack: nil,
+            excludedRouteKeys: [exclusion]
+        )
+
+        XCTAssertTrue(router.matches(in: "Apollo").isEmpty)
+        XCTAssertEqual(router.matches(in: "Moon Mission").map(\.target.title), ["Mission"])
+        XCTAssertEqual(router.matches(in: "Journal").map(\.target.title), ["Journal"])
+    }
+
+    func testRouteExclusionBlocksEquivalentPhraseAndOrderedSiblingsOnlyForThatNode() {
+        let pack = makePack(cards: [
+            makeCard(
+                id: "mission",
+                title: "Mission",
+                activeTriggers: [
+                    .init(pattern: .phrase("moon mission"), origin: .phraseFamily, score: 0.94),
+                    .init(
+                        pattern: .orderedTerms(["moon", "mission"], maximumGap: 2),
+                        origin: .phraseFamily,
+                        score: 0.92
+                    ),
+                    .init(pattern: .phrase("lunar mission"), origin: .semanticAlias, score: 0.91),
+                ]
+            ),
+            makeCard(
+                id: "journal",
+                title: "Journal",
+                activeTriggers: [
+                    .init(pattern: .phrase("journal"), origin: .canonicalName, score: 1),
+                ]
+            ),
+        ])
+        let exclusion = VoiceRouteExclusionKey(
+            sourceID: "folder:a",
+            nodeID: "mission",
+            pattern: .init(kind: .phrase, normalizedTerms: ["moon", "mission"])
+        )
+        let router = VoiceRoutingRuntimeRouter(
+            baseTargets: [],
+            pack: pack,
+            excludedRouteKeys: [exclusion]
+        )
+
+        XCTAssertTrue(router.matches(in: "moon mission").isEmpty)
+        XCTAssertTrue(router.matches(in: "moon about mission").isEmpty)
+        XCTAssertEqual(router.matches(in: "lunar mission").map(\.target.title), ["Mission"])
+        XCTAssertEqual(router.matches(in: "journal").map(\.target.title), ["Journal"])
+    }
+
+    func testSharedConceptExclusionRemovesOnlyTheRejectedCandidate() {
+        let pattern = VoiceRoutingTriggerPattern.phrase("knowledge system")
+        var pack = makePack(cards: [
+            makeCard(id: "brain", title: "Second Brain"),
+            makeCard(id: "notes", title: "Project Notes"),
+        ])
+        pack.sharedConcepts = [
+            .init(
+                id: VoiceRoutingSharedConcept.stableID(for: pattern),
+                pattern: pattern,
+                candidates: [
+                    .init(nodeID: "brain", compiledStrength: 0.92, origin: .phraseFamily, evidenceHash: "hash-brain"),
+                    .init(nodeID: "notes", compiledStrength: 0.91, origin: .phraseFamily, evidenceHash: "hash-notes"),
+                ]
+            ),
+        ]
+        let exclusion = VoiceRouteExclusionKey(
+            sourceID: "folder:a",
+            nodeID: "brain",
+            pattern: pattern.routePatternIdentity
+        )
+        let router = VoiceRoutingRuntimeRouter(
+            baseTargets: [],
+            pack: pack,
+            excludedRouteKeys: [exclusion]
+        )
+
+        let match = router.sharedMatches(in: "open my knowledge system").first
+        XCTAssertEqual(match?.orderedCandidateNodeIDs, ["notes"])
+    }
+
     private func makePack(cards: [VoiceRoutingCard]) -> VoiceRoutingPack {
         VoiceRoutingPack(
             graphRevision: "graph",

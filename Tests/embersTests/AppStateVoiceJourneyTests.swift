@@ -146,6 +146,124 @@ final class AppStateVoiceJourneyTests: XCTestCase {
         try await waitForSelection("apollo", in: app.dash)
     }
 
+    func testOpenedVoicePeekCanBeRejectedOnceAndUndone() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        XCTAssertNotNil(peek.routeEvidence)
+
+        app.openPeek(peek)
+        XCTAssertNotNil(app.voiceLearning.activeJourney)
+        XCTAssertTrue(app.rejectActivePeekJourney())
+        XCTAssertFalse(app.rejectActivePeekJourney(), "The same visible journey must be consumed only once.")
+        try await waitForExclusionCount(1, in: app.voiceLearning)
+        XCTAssertEqual(app.voiceLearning.notice?.message, "Not this — learned")
+        XCTAssertTrue(app.peeks.peeks.isEmpty)
+
+        app.undoVoiceRejection()
+        try await waitForExclusionCount(0, in: app.voiceLearning)
+        XCTAssertNil(app.voiceLearning.notice)
+    }
+
+    func testRejectedVoiceRouteStaysExcludedAfterAnOlderReloadCompletes() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let store = DelayedSnapshotVoiceLearningStore()
+        let app = fixture.makeAppState(learningStore: store)
+        try await fixture.waitForContext(in: app.context)
+        await store.waitForFirstSnapshotToStart()
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        app.openPeek(peek)
+        XCTAssertTrue(app.rejectActivePeekJourney())
+        try await waitForExclusionCount(1, in: app.voiceLearning)
+
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(app.voiceLearning.snapshot.exclusions.count, 1)
+        app.closeNotch(immediately: true)
+        app.peeks.clear()
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertTrue(app.peeks.peeks.isEmpty, "Speaking the rejected phrase again must abstain.")
+    }
+
+    func testEscapeDismissesWithoutPersistingVoiceFeedback() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        app.openPeek(peek)
+        try await waitForSelection("apollo", in: app.dash)
+        XCTAssertNotNil(app.voiceLearning.activeJourney)
+
+        app.handleKey(.escape)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertNil(app.voiceLearning.activeJourney)
+        XCTAssertTrue(app.voiceLearning.snapshot.exclusions.isEmpty)
+        XCTAssertNil(app.voiceLearning.notice)
+    }
+
+    func testFailedPersistenceShowsErrorWithoutClaimingLearning() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState(learningStore: FailingVoiceLearningStore())
+        try await fixture.waitForContext(in: app.context)
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        app.openPeek(peek)
+        XCTAssertTrue(app.rejectActivePeekJourney())
+        try await waitForNotice("Couldn’t save voice feedback", in: app.voiceLearning)
+
+        XCTAssertTrue(app.voiceLearning.snapshot.exclusions.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(app.voiceLearning.notice).canUndo)
+    }
+
+    func testSourceScopedResetProvidesDurableRecoveryIndependentOfNoticeUndo() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.speech.onTranscript?(.init(text: "Apollo", isFinal: false, utteranceID: UUID()))
+        let peek = try await waitForSolePeek(in: app.peeks)
+        let sourceID = try XCTUnwrap(peek.routeEvidence?.exclusionKey.sourceID)
+        app.openPeek(peek)
+        XCTAssertTrue(app.rejectActivePeekJourney())
+        try await waitForExclusionCount(1, in: app.voiceLearning)
+        XCTAssertTrue(app.voiceLearning.canReset(sourceID: sourceID))
+
+        app.voiceLearning.reset(sourceID: sourceID)
+        try await waitForExclusionCount(0, in: app.voiceLearning)
+        try await waitForNotice("Voice feedback reset", in: app.voiceLearning)
+
+        XCTAssertFalse(app.voiceLearning.canReset(sourceID: sourceID))
+        XCTAssertFalse(try XCTUnwrap(app.voiceLearning.notice).canUndo)
+    }
+
+    func testManualContextOpenCannotCreateNegativeVoiceLearning() async throws {
+        let fixture = try AppStateVoiceFixture()
+        defer { fixture.cleanUp() }
+        let app = fixture.makeAppState()
+        try await fixture.waitForContext(in: app.context)
+
+        app.openMatch(.init(phrase: "Apollo", ref: .node("apollo"), title: "Apollo"))
+
+        XCTAssertNil(app.voiceLearning.activeJourney)
+        XCTAssertFalse(app.rejectActivePeekJourney())
+        XCTAssertTrue(app.voiceLearning.snapshot.exclusions.isEmpty)
+    }
+
     private func waitForSolePeek(in queue: PeekQueue) async throws -> Peek {
         for _ in 0..<100 {
             if queue.peeks.count == 1 { return queue.peeks[0] }
@@ -160,6 +278,28 @@ final class AppStateVoiceJourneyTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(dashboard.selected, nodeID)
+    }
+
+    private func waitForExclusionCount(
+        _ count: Int,
+        in learning: VoiceLearningCoordinator
+    ) async throws {
+        for _ in 0..<100 {
+            if learning.snapshot.exclusions.count == count { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(learning.snapshot.exclusions.count, count)
+    }
+
+    private func waitForNotice(
+        _ message: String,
+        in learning: VoiceLearningCoordinator
+    ) async throws {
+        for _ in 0..<100 {
+            if learning.notice?.message == message { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(learning.notice?.message, message)
     }
 }
 
@@ -177,7 +317,10 @@ private struct AppStateVoiceFixture {
     }
 
     @MainActor
-    func makeAppState(featureFlags: AppFeatureFlags = AppFeatureFlags()) -> AppState {
+    func makeAppState(
+        featureFlags: AppFeatureFlags = AppFeatureFlags(),
+        learningStore: (any VoiceLearningStoring)? = nil
+    ) -> AppState {
         let plugin = VoiceJourneyProvider()
         let snapshotRepository = VoiceJourneyMemoryRepository()
         let host = try! PluginHost(plugins: [plugin], repository: snapshotRepository)
@@ -205,6 +348,15 @@ private struct AppStateVoiceFixture {
                 fileURL: rootURL.appendingPathComponent("voice-preferences.json")
             )
         )
+        let resolvedLearningStore: any VoiceLearningStoring
+        if let learningStore {
+            resolvedLearningStore = learningStore
+        } else {
+            resolvedLearningStore = VoiceLearningStore(
+                fileURL: rootURL.appendingPathComponent("voice-learning.json")
+            )
+        }
+        let voiceLearning = VoiceLearningCoordinator(store: resolvedLearningStore)
         let voiceRouting = VoiceRoutingCoordinator(
             context: controller,
             speech: speech,
@@ -212,6 +364,7 @@ private struct AppStateVoiceFixture {
             peeks: peeks,
             packLifecycle: packLifecycle,
             preferences: preferences,
+            learning: voiceLearning,
             featureFlags: featureFlags
         )
         let changeBaselines = UserDefaultsChangeBaselineStore(
@@ -229,6 +382,7 @@ private struct AppStateVoiceFixture {
             notch: notch,
             peeks: peeks,
             voiceRouting: voiceRouting,
+            voiceLearning: voiceLearning,
             dashboardNavigation: navigation,
             taskMutations: DashboardTaskMutationCoordinator(context: controller, navigation: navigation),
             changeBaselines: changeBaselines
@@ -333,4 +487,75 @@ private actor VoiceJourneyMemoryRepository: PluginSnapshotRepository {
         snapshots[source] = snapshot
     }
     func remove(source: PluginSourceIdentifier) async throws { snapshots.removeValue(forKey: source) }
+}
+
+private actor DelayedSnapshotVoiceLearningStore: VoiceLearningStoring {
+    private var exclusions: [VoiceRouteExclusionKey: VoiceRouteExclusion] = [:]
+    private var snapshotCallCount = 0
+    private var firstSnapshotStarted = false
+
+    func waitForFirstSnapshotToStart() async {
+        while !firstSnapshotStarted { await Task.yield() }
+    }
+
+    func snapshot(sourceIDs: Set<String>) async throws -> VoiceLearningSnapshot {
+        snapshotCallCount += 1
+        let call = snapshotCallCount
+        let captured = exclusions.filter { sourceIDs.contains($0.key.sourceID) }
+        if call == 1 {
+            firstSnapshotStarted = true
+            try? await Task.sleep(for: .milliseconds(240))
+        } else {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return VoiceLearningSnapshot(sourceIDs: sourceIDs, exclusions: captured)
+    }
+
+    func recordExclusion(
+        _ key: VoiceRouteExclusionKey,
+        at date: Date,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot {
+        exclusions[key] = .init(key: key, rejectedAt: date)
+        return .init(sourceIDs: [key.sourceID], exclusions: exclusions)
+    }
+
+    func removeExclusion(
+        _ key: VoiceRouteExclusionKey,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot {
+        exclusions[key] = nil
+        return .init(sourceIDs: [key.sourceID], exclusions: exclusions)
+    }
+
+    func delete(sourceID: String, sourceGeneration: UInt64) async throws {
+        exclusions = exclusions.filter { $0.key.sourceID != sourceID }
+    }
+}
+
+private actor FailingVoiceLearningStore: VoiceLearningStoring {
+    enum Failure: Error { case save }
+
+    func snapshot(sourceIDs: Set<String>) async throws -> VoiceLearningSnapshot {
+        .init(sourceIDs: sourceIDs, exclusions: [:])
+    }
+
+    func recordExclusion(
+        _ key: VoiceRouteExclusionKey,
+        at date: Date,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot {
+        throw Failure.save
+    }
+
+    func removeExclusion(
+        _ key: VoiceRouteExclusionKey,
+        sourceGeneration: UInt64
+    ) async throws -> VoiceLearningSnapshot {
+        throw Failure.save
+    }
+
+    func delete(sourceID: String, sourceGeneration: UInt64) async throws {
+        throw Failure.save
+    }
 }

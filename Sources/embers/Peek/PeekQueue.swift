@@ -33,7 +33,24 @@ struct Peek: Identifiable, Equatable {
     let id: String              // stable per target → enables refresh instead of dup
     let target: MatchTarget
     let title: String           // short label rendered in the slab
+    /// Present only for a real voice-router presentation. It stays immutable
+    /// across ordinary refreshes so one visible Peek always has one cause.
+    let routeEvidence: RoutePresentationEvidence?
     var bornAt: Date
+
+    init(
+        id: String,
+        target: MatchTarget,
+        title: String,
+        routeEvidence: RoutePresentationEvidence? = nil,
+        bornAt: Date
+    ) {
+        self.id = id
+        self.target = target
+        self.title = title
+        self.routeEvidence = routeEvidence
+        self.bornAt = bornAt
+    }
 
     static func == (l: Peek, r: Peek) -> Bool { l.id == r.id && l.bornAt == r.bornAt }
 }
@@ -48,8 +65,8 @@ final class PeekQueue: ObservableObject {
     init() {}
 
     /// A speech match arrived. Insert (or refresh) and enforce the 3-slot FIFO window.
-    func push(_ target: MatchTarget) {
-        let peek = resolve(target)
+    func push(_ target: MatchTarget, routeEvidence: RoutePresentationEvidence? = nil) {
+        let peek = resolve(target, routeEvidence: routeEvidence)
 
         if let idx = peeks.firstIndex(where: { $0.id == peek.id }) {
             peeks[idx].bornAt = .now
@@ -85,7 +102,11 @@ final class PeekQueue: ObservableObject {
 
     /// Replace the visible candidate set for one shared concept without disturbing peeks from
     /// other concepts or unique matches.
-    func replaceConcept(_ conceptID: String, with targets: [MatchTarget]) {
+    func replaceConcept(
+        _ conceptID: String,
+        with targets: [MatchTarget],
+        routeEvidenceByNodeID: [String: RoutePresentationEvidence] = [:]
+    ) {
         let existingIDs = peeks.compactMap { peek -> String? in
             peek.target.conceptID == conceptID ? peek.id : nil
         }
@@ -96,7 +117,12 @@ final class PeekQueue: ObservableObject {
         withAnimation(NotchViewModel.peekLayout) {
             peeks.removeAll { $0.target.conceptID == conceptID }
         }
-        targets.forEach(push)
+        targets.forEach { target in
+            let evidence: RoutePresentationEvidence? = switch target.ref {
+            case .node(let nodeID): routeEvidenceByNodeID[nodeID]
+            }
+            push(target, routeEvidence: evidence)
+        }
     }
 
     func removeConcept(_ conceptID: String) {
@@ -128,11 +154,20 @@ final class PeekQueue: ObservableObject {
     }
 
     // MARK: - Resolve a match target into a renderable peek
-    private func resolve(_ target: MatchTarget) -> Peek {
+    private func resolve(
+        _ target: MatchTarget,
+        routeEvidence: RoutePresentationEvidence?
+    ) -> Peek {
         switch target.ref {
         case .node(let id):
             let identity = target.conceptID.map { "c:\($0):n:\(id)" } ?? "n:\(id)"
-            return Peek(id: identity, target: target, title: target.title, bornAt: .now)
+            return Peek(
+                id: identity,
+                target: target,
+                title: target.title,
+                routeEvidence: routeEvidence,
+                bornAt: .now
+            )
         }
     }
 

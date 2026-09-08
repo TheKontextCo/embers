@@ -1,4 +1,5 @@
 import EmbersCore
+import EmbersLocal
 import XCTest
 @testable import embers
 
@@ -257,6 +258,62 @@ final class ContextLensTests: XCTestCase {
         XCTAssertTrue(withoutModel.entries[0].modelProposal.semanticAliases.isEmpty)
         XCTAssertEqual(withoutModel.entries[0].deterministicDecision.baselineMatches,
                        document.entries[0].deterministicDecision.baselineMatches)
+    }
+
+    func testDocumentExposesOnlySourceScopedDeterministicRoutingExclusions() throws {
+        let anchor = Anchor(
+            id: "apollo-anchor",
+            canonicalName: "Apollo",
+            provenance: [.folder],
+            memberArtifactIDs: []
+        )
+        let snapshot = ContextSnapshot(
+            sourceID: "folder:a",
+            revision: "revision",
+            artifacts: [],
+            anchors: [anchor],
+            relations: [],
+            diagnostics: [],
+            indexedAt: .init(timeIntervalSince1970: 1)
+        )
+        let graph = ContextGraph(
+            revision: snapshot.revision,
+            nodes: [node(id: "apollo", anchor: anchor)],
+            edges: []
+        )
+        let includedKey = VoiceRouteExclusionKey(
+            sourceID: "folder:a",
+            nodeID: "apollo",
+            pattern: .init(kind: .phrase, normalizedTerms: ["apollo"])
+        )
+        let otherSourceKey = VoiceRouteExclusionKey(
+            sourceID: "folder:b",
+            nodeID: "apollo",
+            pattern: .init(kind: .phrase, normalizedTerms: ["apollo"])
+        )
+        let learning = VoiceLearningSnapshot(
+            sourceIDs: ["folder:a", "folder:b"],
+            exclusions: [
+                includedKey: .init(key: includedKey, rejectedAt: .init(timeIntervalSince1970: 3)),
+                otherSourceKey: .init(key: otherSourceKey, rejectedAt: .init(timeIntervalSince1970: 4)),
+            ]
+        )
+
+        let document = try XCTUnwrap(ContextLensDocumentBuilder().build(
+            sourceID: "folder:a",
+            sourceName: "Apollo Vault",
+            sourceSnapshot: snapshot,
+            graph: graph,
+            snapshot: snapshot,
+            pack: nil,
+            learning: learning
+        ))
+
+        XCTAssertEqual(document.schemaVersion, 3)
+        XCTAssertEqual(
+            document.entries[0].deterministicDecision.routingExclusions,
+            [.init(pattern: includedKey.pattern, rejectedAt: .init(timeIntervalSince1970: 3))]
+        )
     }
 
     private func artifact(id: String, title: String, sourceID: String) -> SourceArtifact {

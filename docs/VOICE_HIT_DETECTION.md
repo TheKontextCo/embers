@@ -17,7 +17,7 @@ source graph
   → every partial transcript
   → exact identity | shared concept | abstain
   → peek candidates
-  → explicit local preference
+  → explicit local preference or correction
 ```
 
 ## The laws
@@ -29,8 +29,8 @@ source graph
 5. Precision comes from permission, not confidence.
 6. Latency is a time-series problem, not a debounce problem.
 7. Suppression belongs to an occurrence, not a recognizer session.
-8. User behavior may rank valid choices; it may not manufacture validity.
-9. The active pack is executable truth. Everything else is commentary.
+8. Explicit user behavior may rank valid choices or remove one spoken route; it may not manufacture validity.
+9. The active pack plus explicit local exclusions are executable truth. Everything else is commentary.
 10. Abstention is a successful result.
 
 ## What Apple actually gives us
@@ -228,7 +228,7 @@ candidate order must not disturb unrelated peeks or their timers.
 
 Presentation state is not decoration. The router needs it to decide whether a new hit is useful.
 
-## Learning is a ranking overlay, not a new ontology
+## Learning is local, explicit, and reversible
 
 Compiled packs are shared truth about what may match. Personal behavior is local evidence about which
 valid destination a user prefers.
@@ -242,16 +242,38 @@ source + concept + node
 The weight decays with a 30-day half-life. It can reorder candidates before the three-item cap. It
 cannot turn an invalid edge into a valid one, change unique identity routing, or bypass a negative.
 
-Presentations, automatic opens, abstentions, retractions, and dismissals do not teach. Absence of a
-click has too many meanings to be clean negative evidence.
+Presentations, automatic opens, abstentions, retractions, Escape, back navigation, and ordinary
+dismissals do not teach. Absence of a click has too many meanings to be clean negative evidence.
+Only an explicit right-click on the context opened from a routed Peek records negative feedback.
+
+That correction stores the source, node, exact presented pattern, and rejection time. At runtime its
+normalized spoken-term family is the permission boundary: equivalent contiguous phrase and bounded
+ordered-term compiler forms cannot reopen the same node with the same words. Other phrases for that
+node and the same phrase for other nodes remain available.
 
 The preference store is local, inspectable, source-scoped, resettable, and deleted with its folder.
 Connected sources keep separate histories. Delayed writes carry source epochs so reset or folder
 removal cannot be undone by an old asynchronous task.
 
+Negative feedback is also local, inspectable in Context Lens, source-scoped, and deleted with its
+folder. The immediate notice offers Undo; the source menu provides a durable reset after that notice
+expires. A persistence failure is shown as a failure and must never claim the route was learned.
+Snapshot publication is generation-guarded so a stale reload cannot reactivate a route after its
+exclusion was saved.
+
+The feedback archive is loaded before any mutation becomes authoritative. A corrupt, unsupported,
+or unreadable archive remains a visible load failure: it is never interpreted as empty learning and
+can be retried. Retiring a source is the one explicit recovery operation for that condition. Because
+the archive is shared, the app cannot selectively preserve unknown records; it deletes the unreadable
+archive only after the durable delete succeeds. A failed recovery leaves the archive intact and
+retryable. Cancellation before a learning, Undo, or reset mutation is neutral and leaves durable
+feedback untouched.
+
 The compiled pack answers: **what is allowed?**
 
 The preference overlay answers: **among allowed choices, what has this user chosen before?**
+
+The correction overlay answers: **which spoken route has this user explicitly withdrawn locally?**
 
 Mixing those questions would make the system less explainable with every use.
 
@@ -295,6 +317,7 @@ The fastest debugging tool is often the active `voice-routing.json`. It answers 
 2. Was it active, descriptive, rejected, or promoted to a shared concept?
 3. Which nodes own it, and with what provenance?
 4. Is this exact graph revision and compiler generation active in the running process?
+5. Has local explicit feedback withdrawn this route for this source and node?
 
 ## What failed, and what it taught us
 
@@ -329,7 +352,7 @@ Match every partial. Present reversibly.
 
 Let identity navigate. Let concepts offer choices. Let generic speech disappear.
 
-Remember explicit choices, not inferred rejection.
+Remember explicit choices and explicit right-click corrections, never inferred rejection.
 
 Re-arm on new evidence, not elapsed time.
 

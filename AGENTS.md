@@ -10,6 +10,11 @@ local folder → deterministic graph → voice match → useful context
 
 A first-time user should select an Obsidian vault or Markdown folder and get useful results without an account, network request, model, or manual setup.
 
+## Kontext project updates
+
+- Save relevant Kontext project discussions, progress, findings, decisions, tasks, and documents automatically; no separate confirmation is required.
+- Update existing records where appropriate and keep task status current.
+
 ## Invariants
 
 - User content stays on-device. Network access is limited to providers the user explicitly connects.
