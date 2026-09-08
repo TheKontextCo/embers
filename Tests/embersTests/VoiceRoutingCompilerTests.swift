@@ -1464,6 +1464,64 @@ final class VoiceRoutingCompilerTests: XCTestCase {
         )
     }
 
+    func testQualityGateAcceptsExactlyEightyPercentCanonicalCoverage() {
+        let cards = (1...4).map { card(id: "card-\($0)", title: "Card \($0)", active: []) }
+
+        let passing = VoiceRoutingQualityGate().evaluate(pack: pack(cards), expectedNodeCount: 5)
+        let failing = VoiceRoutingQualityGate().evaluate(pack: pack(cards), expectedNodeCount: 6)
+
+        XCTAssertEqual(passing.coverage, 0.8)
+        XCTAssertTrue(passing.passed, passing.failures.joined(separator: ", "))
+        XCTAssertEqual(failing.coverage, 4.0 / 6.0)
+        XCTAssertFalse(failing.passed)
+        XCTAssertEqual(failing.failures, ["validated card coverage below 80%"])
+    }
+
+    func testQualityGatePreservesZeroAndMismatchedExpectedCountSemantics() {
+        let empty = VoiceRoutingQualityGate().evaluate(pack: pack([]), expectedNodeCount: 0)
+        let cards = [
+            card(id: "alpha", title: "Alpha", active: []),
+            card(id: "beta", title: "Beta", active: []),
+        ]
+        let mismatch = VoiceRoutingQualityGate().evaluate(pack: pack(cards), expectedNodeCount: 1)
+
+        XCTAssertEqual(empty.coverage, 0)
+        XCTAssertFalse(empty.passed)
+        XCTAssertEqual(empty.failures, ["validated card coverage below 80%"])
+        XCTAssertEqual(mismatch.coverage, 2)
+        XCTAssertTrue(mismatch.passed, mismatch.failures.joined(separator: ", "))
+    }
+
+    func testQualityGateDeduplicatesSortsDiagnosticsAndKeepsWarningsWithFailures() {
+        let brain = card(
+            id: "brain",
+            title: "Building a Second Brain",
+            active: [trigger("second brain", origin: .shortenedCanonical, score: 0.94)]
+        )
+        let archive = card(
+            id: "archive",
+            title: "Archive",
+            active: [
+                trigger("show me my notes", origin: .semanticAlias, score: 0.92),
+                trigger("I should write something", origin: .semanticAlias, score: 0.92),
+            ]
+        )
+        let journal = card(id: "journal", title: "Journal", active: [])
+        let candidatePack = pack([brain, archive, journal])
+
+        let result = VoiceRoutingQualityGate().evaluate(pack: candidatePack, expectedNodeCount: 3)
+
+        XCTAssertFalse(result.passed)
+        XCTAssertEqual(result.failures, [
+            "generic regression did not abstain: I should write something",
+            "generic regression did not abstain: Show me my notes",
+        ])
+        XCTAssertEqual(result.warnings, [
+            "fixed recall regression missed for brain: knowledge system",
+            "fixed recall regression missed for journal: I need to write in my diary",
+        ])
+    }
+
     private func seed(
         id: String,
         name: String,

@@ -1,0 +1,18 @@
+{
+  "measuredAt": "2026-09-06",
+  "commit": "8fc47e5aab970f6406f4ff1a9e0d1b592648797a",
+  "analyzer": "SwiftLint",
+  "version": "0.65.1",
+  "rule": "cyclomatic_complexity",
+  "ignores_case_statements": false,
+  "scope": ["Sources", "Tests"],
+  "source": {"maximum": 33, "findingsAbove1": 258},
+  "tests": {"maximum": 7, "findingsAbove1": 46},
+  "combinedCountsAbove": {"10": 22, "15": 11, "20": 4},
+  "hotspots": [
+    {"file": "Sources/embers/Speech/VoiceRouting.swift", "symbol": "VoiceRoutingQualityGate.evaluate", "score": 33},
+    {"file": "Sources/EmbersLocal/FolderContextSource.swift", "symbol": "FolderContextSource.scanFiles", "score": 29},
+    {"file": "Sources/EmbersCore/DeterministicGraphBuilder.swift", "symbol": "DeterministicGraphBuilder.build", "score": 24},
+    {"file": "Sources/EmbersCore/DeterministicGraphBuilder.swift", "symbol": "exactMentionPostings", "score": 22}
+  ]
+}

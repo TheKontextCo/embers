@@ -83,6 +83,7 @@ For UI, speech, permissions, or lifecycle behaviour, verify the signed applicati
 
 ```bash
 swift test
+./scripts/verify-complexity.sh
 git diff --check
 ./scripts/bundle.sh debug
 open build/embers.app
