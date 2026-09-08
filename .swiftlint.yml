@@ -1,0 +1,7 @@
+only_rules:
+  - cyclomatic_complexity
+
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+  ignores_case_statements: false
